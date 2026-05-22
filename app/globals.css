@@ -272,4 +272,30 @@
     50% { opacity: 0.5; }
   }
   .animate-pulse-soft { animation: pulse-soft 1.5s ease-in-out infinite; }
+
+  /* Homepage entrance: word-by-word reveal */
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Slow drifting background accents */
+  @keyframes drift-a {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(24px, -28px) scale(1.06); }
+  }
+  @keyframes drift-b {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(-32px, 22px) scale(1.08); }
+  }
+  @keyframes drift-c {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(18px, 18px) scale(0.94); }
+  }
+
+  /* Progress indicator under the synced action verb */
+  @keyframes dot-progress {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
+  }
 }
