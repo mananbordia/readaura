@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionUserId } from '@/lib/auth';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 
 const ALLOWED_VOICES = [
@@ -12,11 +11,6 @@ const ALLOWED_VOICES = [
 ];
 
 export async function POST(req: NextRequest) {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
   const { text, voice = 'en-US-AriaNeural' } = await req.json();
 
   if (!text || typeof text !== 'string') {

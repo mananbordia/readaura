@@ -1,40 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionUserId } from '@/lib/auth';
-import { getDocumentById } from '@/lib/db';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { streamText, convertToModelMessages, type UIMessage } from 'ai';
+
+// Allow up to 60s for streaming responses. Vercel hobby tier caps at 60s;
+// pro tier can extend further if needed.
+export const maxDuration = 60;
 
 const MAX_SELECTED_TEXT = 2000;
 const MAX_CONTEXT = 2000;
 const MAX_MESSAGES = 20;
 
-// Per-user rate limiting (in-memory; resets on server restart)
+// Per-IP rate limiting (in-memory, per-instance). Best-effort: serverless
+// hosts may spread requests across instances and lose the count, which is
+// acceptable for a self-hosted tool whose users supply their own keys.
 const RATE_LIMIT_PER_HOUR = 60;
 const RATE_LIMIT_PER_MINUTE = 10;
 const requestLog = new Map<string, number[]>();
 
-function checkRateLimit(userId: string): { ok: boolean; retryAfter?: number } {
+function checkRateLimit(key: string): { ok: boolean; retryAfter?: number } {
   const now = Date.now();
-  const log = requestLog.get(userId) ?? [];
+  const log = requestLog.get(key) ?? [];
   const recent = log.filter(t => now - t < 60 * 60 * 1000);
   const lastMinute = recent.filter(t => now - t < 60 * 1000).length;
-
-  if (recent.length >= RATE_LIMIT_PER_HOUR) {
-    return { ok: false, retryAfter: 60 * 60 };
-  }
-  if (lastMinute >= RATE_LIMIT_PER_MINUTE) {
-    return { ok: false, retryAfter: 60 };
-  }
+  if (recent.length >= RATE_LIMIT_PER_HOUR) return { ok: false, retryAfter: 60 * 60 };
+  if (lastMinute >= RATE_LIMIT_PER_MINUTE) return { ok: false, retryAfter: 60 };
   recent.push(now);
-  requestLog.set(userId, recent);
+  requestLog.set(key, recent);
   return { ok: true };
 }
 
 export async function POST(req: NextRequest) {
-  const userId = await getSessionUserId();
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const rate = checkRateLimit(userId);
+  // No auth — the user supplies their own NVIDIA key. Rate-limit by IP so a
+  // single misbehaving client can't burn through a shared env-var key.
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+  const rate = checkRateLimit(ip);
   if (!rate.ok) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, {
       status: 429,
@@ -49,8 +48,7 @@ export async function POST(req: NextRequest) {
   }
 
   const {
-    reportId,
-    reportTitle,
+    documentTitle,
     selectedText,
     contextBefore,
     contextAfter,
@@ -58,8 +56,6 @@ export async function POST(req: NextRequest) {
     apiKey: userApiKey,
   } = body as Record<string, unknown>;
 
-  // Prefer the user-supplied key from localStorage; fall back to env so existing
-  // self-hosted setups still work without forcing a settings round-trip.
   const clientKey = typeof userApiKey === 'string' ? userApiKey.trim() : '';
   const envKey = (process.env.NVIDIA_API_KEY ?? '').trim();
   const apiKey = clientKey || envKey;
@@ -71,20 +67,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (typeof reportId !== 'string') {
-    return NextResponse.json({ error: 'Invalid reportId' }, { status: 400 });
-  }
-  const doc = getDocumentById(reportId);
-  if (!doc || doc.userId !== userId) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  }
-
   if (typeof selectedText !== 'string' || selectedText.trim().length === 0 || selectedText.length > MAX_SELECTED_TEXT) {
     return NextResponse.json({ error: 'Invalid selectedText' }, { status: 400 });
   }
   const ctxBefore = (typeof contextBefore === 'string' ? contextBefore : '').slice(0, MAX_CONTEXT);
   const ctxAfter = (typeof contextAfter === 'string' ? contextAfter : '').slice(0, MAX_CONTEXT);
-  const title = typeof reportTitle === 'string' ? reportTitle.slice(0, 200) : doc.title;
+  const title = typeof documentTitle === 'string' ? documentTitle.slice(0, 200) : 'document';
 
   if (!Array.isArray(messages)) {
     return NextResponse.json({ error: 'Invalid messages' }, { status: 400 });
@@ -116,7 +104,6 @@ On follow-up turns, answer the user's specific question while staying anchored t
 
   const modelMessages = await convertToModelMessages(uiMessages);
 
-  // Build the client per-request so we can honor the runtime key. Cheap.
   const nvidia = createOpenAICompatible({
     name: 'nvidia',
     baseURL: 'https://integrate.api.nvidia.com/v1',

@@ -1,17 +1,15 @@
 import Navbar from '@/components/Navbar';
-import { getSessionUserId } from '@/lib/auth';
-import { listDocuments } from '@/lib/db';
 import LibraryClient from './LibraryClient';
 
-export default async function LibraryPage() {
-  const userId = await getSessionUserId();
-  const initialDocuments = userId ? listDocuments(userId) : [];
+export default function LibraryPage() {
+  // Library data is stored client-side in IndexedDB; the only thing the
+  // server contributes is whether an env-var NVIDIA key exists as a fallback.
   const aiConfigured = Boolean(process.env.NVIDIA_API_KEY);
 
   return (
     <>
       <Navbar />
-      <LibraryClient initialDocuments={initialDocuments} aiConfigured={aiConfigured} />
+      <LibraryClient aiConfigured={aiConfigured} />
     </>
   );
 }

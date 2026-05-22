@@ -6,13 +6,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Get a free key at https://build.nvidia.com/. Optional — the rest of
-      # the app (upload, viewer, TTS) works without it.
+      # Optional server-side fallback. The primary flow stores the NVIDIA
+      # key in the user's browser via the Settings dialog.
       NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
-      READAURA_DB_PATH: /data/readaura.db
-    volumes:
-      - readaura_data:/data
     restart: unless-stopped
-
-volumes:
-  readaura_data:

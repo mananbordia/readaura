@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { readApiKey } from '@/lib/use-api-key';
+import { createExplanation, appendExplanationMessages } from '@/lib/storage';
 
 const MAX_TURNS = 20;
 
@@ -56,8 +57,7 @@ export default function ExplainPopover({
     transport: new DefaultChatTransport({
       api: '/api/ai/explain',
       body: {
-        reportId: documentId,
-        reportTitle: documentTitle,
+        documentTitle,
         selectedText,
         contextBefore,
         contextAfter,
@@ -120,14 +120,14 @@ export default function ExplainPopover({
 
     try {
       if (!savedId) {
-        const res = await fetch(`/api/library/${documentId}/explanations`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ selectedText, contextBefore, contextAfter, messages: messagesToPersist }),
+        const exp = await createExplanation({
+          documentId,
+          selectedText,
+          contextBefore,
+          contextAfter,
+          messages: messagesToPersist,
         });
-        if (!res.ok) throw new Error('Save failed');
-        const data = await res.json() as { id: string };
-        setSavedId(data.id);
+        setSavedId(exp.id);
         setSavedMessageCount(messages.length);
       } else {
         const newMessages = messagesToPersist.slice(savedMessageCount);
@@ -136,12 +136,7 @@ export default function ExplainPopover({
           setTimeout(() => setSaveStatus('idle'), 1500);
           return;
         }
-        const res = await fetch(`/api/library/${documentId}/explanations/${savedId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: newMessages }),
-        });
-        if (!res.ok) throw new Error('Save failed');
+        await appendExplanationMessages(savedId, newMessages);
         setSavedMessageCount(messages.length);
       }
       setSaveStatus('saved');

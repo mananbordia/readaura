@@ -15,16 +15,23 @@ cp .env.example .env.local
 npm run dev
 ```
 
-The app boots at http://localhost:3000. SQLite (`readaura.db`) and uploaded files (`data/reports/local/`) are created on first run and ignored by git.
+The app boots at http://localhost:3000. The library lives entirely in your browser's IndexedDB — nothing is written to disk, so there's no database file to wipe and no `data/` directory to manage.
 
 ## Project layout
 
 ```
-app/                  Next.js App Router pages and API routes
-  api/library/        Server routes (uploads, AI explain, TTS, etc.)
-  library/            The Library UI
-components/           Shared React components (Navbar, theme, shadcn-style ui/)
-lib/                  Server-only helpers — DB, text extraction, auth shim
+app/
+  api/ai/explain/     Streaming NVIDIA proxy (the only AI route)
+  api/tts/            msedge-tts proxy
+  library/            The Library UI (LibraryClient is the heart)
+components/           Shared React components — Navbar, theme, shadcn-style ui/
+  ui/                 shadcn-style primitives (Radix + cva)
+lib/
+  storage.ts          IndexedDB wrapper (everything user-facing lives here)
+  types.ts            Document / SavedExplanation shape
+  pdf-text.ts         Browser-side PDF text extraction via pdfjs-dist
+  docx-html.ts        Browser-side DOCX → HTML via mammoth
+  use-api-key.ts      Hook for the NVIDIA key in localStorage
 ROADMAP.md            What's planned and why
 ```
 
@@ -41,7 +48,7 @@ ROADMAP.md            What's planned and why
 - [ ] `npm run lint` passes
 - [ ] `npm run build` succeeds
 - [ ] Manually tested the affected flow (upload, view, highlight + explain, read aloud)
-- [ ] If you changed the DB schema, added a migration step in `lib/db.ts` so existing users don't lose data
+- [ ] If you changed the IndexedDB schema in `lib/storage.ts`, bumped `DB_VERSION` and added an `upgrade` branch so existing browsers migrate without data loss
 - [ ] No new secrets, credentials, or large binaries committed
 
 ## Filing issues
