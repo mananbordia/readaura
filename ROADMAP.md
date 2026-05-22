@@ -21,21 +21,7 @@ A pragmatic roadmap, organized by what unblocks an open-source release, then wha
 
 The bar is: a stranger can `git clone`, fill one env var, and have a tool they actually want to use.
 
-### 1.1 Remove finance bleed-through
-- [ ] Rename region tabs (`US / IN / AE`) → user-defined **collections** (or drop the column and use tags only).
-- [ ] Audit all UI strings/icons for finance references; replace with neutral reading-tool language.
-- [ ] Rename `research_reports` table → `documents` (with a migration helper).
-
-### 1.2 Polish the first-run experience
-- [ ] Empty state on `/reports`: a friendly "drop your first PDF here" panel.
-- [ ] Show a clear, in-app banner when `NVIDIA_API_KEY` is missing, with a link to get one.
-- [ ] First-run welcome modal that explains the 3 core actions (upload, highlight, read aloud).
-
 ### 1.3 Distribution
-- [ ] Add `LICENSE` (MIT).
-- [ ] Add `CONTRIBUTING.md` with dev setup, code style, PR checklist.
-- [ ] Dockerfile + `docker compose up` quick-start.
-- [ ] GitHub Actions CI: lint + typecheck + build on PR.
 - [ ] Demo GIF/screenshots in the README.
 
 ### 1.4 Quality basics
