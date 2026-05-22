@@ -1,14 +1,17 @@
 import Navbar from '@/components/Navbar';
-import { getReportsByRegion } from '@/lib/db';
+import { getSessionUserId } from '@/lib/auth';
+import { listDocuments } from '@/lib/db';
 import ReportsClient from './ReportsClient';
 
-export default function ReportsPage() {
-  const initialReports = getReportsByRegion('US');
+export default async function ReportsPage() {
+  const userId = await getSessionUserId();
+  const initialDocuments = userId ? listDocuments(userId) : [];
+  const aiConfigured = Boolean(process.env.NVIDIA_API_KEY);
 
   return (
     <>
       <Navbar />
-      <ReportsClient initialReports={initialReports} />
+      <ReportsClient initialDocuments={initialDocuments} aiConfigured={aiConfigured} />
     </>
   );
 }

@@ -1,38 +1,43 @@
 'use server';
 
 import { getSessionUserId } from '@/lib/auth';
-import { getReportsByRegion, deleteReport as dbDeleteReport, getReportById, updateReport as dbUpdateReport, type ResearchReport } from '@/lib/db';
+import {
+  listDocuments,
+  deleteDocument as dbDeleteDocument,
+  getDocumentById,
+  updateDocument as dbUpdateDocument,
+  type Document,
+} from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
-export async function fetchReports(region: string): Promise<ResearchReport[]> {
+export async function fetchDocuments(): Promise<Document[]> {
   const userId = await getSessionUserId();
   if (!userId) return [];
-  return getReportsByRegion(region);
+  return listDocuments(userId);
 }
 
-export async function removeReport(reportId: string): Promise<{ ok: boolean }> {
+export async function removeDocument(documentId: string): Promise<{ ok: boolean }> {
   const userId = await getSessionUserId();
   if (!userId) return { ok: false };
 
-  const report = getReportById(reportId);
-  if (!report || report.userId !== userId) return { ok: false };
+  const doc = getDocumentById(documentId);
+  if (!doc || doc.userId !== userId) return { ok: false };
 
-  // Delete file from disk
-  const absPath = path.join(process.cwd(), report.filePath);
+  const absPath = path.join(process.cwd(), doc.filePath);
   if (fs.existsSync(absPath)) {
     fs.unlinkSync(absPath);
   }
 
-  dbDeleteReport(reportId, userId);
+  dbDeleteDocument(documentId, userId);
   return { ok: true };
 }
 
-export async function editReport(reportId: string, title: string, tags: string[]): Promise<{ ok: boolean }> {
+export async function editDocument(documentId: string, title: string, tags: string[]): Promise<{ ok: boolean }> {
   const userId = await getSessionUserId();
   if (!userId) return { ok: false };
-  const report = getReportById(reportId);
-  if (!report || report.userId !== userId) return { ok: false };
-  dbUpdateReport(reportId, userId, title.trim(), tags);
+  const doc = getDocumentById(documentId);
+  if (!doc || doc.userId !== userId) return { ok: false };
+  dbUpdateDocument(documentId, userId, title.trim(), tags);
   return { ok: true };
 }

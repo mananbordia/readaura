@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUserId } from '@/lib/auth';
-import { getReportById } from '@/lib/db';
+import { getDocumentById } from '@/lib/db';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { streamText, convertToModelMessages, type UIMessage } from 'ai';
 
@@ -71,8 +71,8 @@ export async function POST(req: NextRequest) {
   if (typeof reportId !== 'string') {
     return NextResponse.json({ error: 'Invalid reportId' }, { status: 400 });
   }
-  const report = getReportById(reportId);
-  if (!report || report.userId !== userId) {
+  const doc = getDocumentById(reportId);
+  if (!doc || doc.userId !== userId) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
   }
   const ctxBefore = (typeof contextBefore === 'string' ? contextBefore : '').slice(0, MAX_CONTEXT);
   const ctxAfter = (typeof contextAfter === 'string' ? contextAfter : '').slice(0, MAX_CONTEXT);
-  const title = typeof reportTitle === 'string' ? reportTitle.slice(0, 200) : report.title;
+  const title = typeof reportTitle === 'string' ? reportTitle.slice(0, 200) : doc.title;
 
   if (!Array.isArray(messages)) {
     return NextResponse.json({ error: 'Invalid messages' }, { status: 400 });
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Conversation too long' }, { status: 400 });
   }
 
-  const systemPrompt = `You are a financial research assistant. The user is reading a research report titled "${title}" and has highlighted the following text:
+  const systemPrompt = `You are a reading assistant helping the user understand a document titled "${title}". The user has highlighted the following passage:
 
 "${selectedText}"
 
@@ -98,9 +98,9 @@ Surrounding context (for reference only — do not summarize the whole context):
 Before: ${ctxBefore}
 After: ${ctxAfter}
 
-Your job is to help the user understand this highlighted text. On the first turn, provide a clear explanation in 2-4 sentences: define jargon, explain the significance, and relate it to the surrounding context if relevant. Do not repeat the highlighted text verbatim.
+Your job is to help the user understand this passage. On the first turn, provide a clear explanation in 2-4 sentences: define unfamiliar terms or jargon, explain the significance, and relate it to the surrounding context where relevant. Do not repeat the highlighted text verbatim.
 
-On follow-up turns, answer the user's specific question while staying anchored to the highlighted text and the report context. If a question goes outside the scope of this document, briefly note that and answer based on general financial knowledge. Keep follow-up answers concise (under 200 words unless the question demands more).`;
+On follow-up turns, answer the user's specific question while staying anchored to the highlighted passage and the document context. If a question goes outside the scope of the document, briefly note that and answer using general knowledge. Keep follow-up answers concise (under 200 words unless the question demands more).`;
 
   const isFirstTurn = messages.length === 0;
   // useChat sends UIMessage[]; convert to model messages.

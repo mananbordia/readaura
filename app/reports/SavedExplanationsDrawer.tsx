@@ -5,13 +5,13 @@ import type { SavedExplanation } from '@/lib/db';
 import { timeAgo } from '@/lib/format';
 
 type Props = {
-  reportId: string;
+  documentId: string;
   // Bumped by parent when a new explanation is saved, to trigger a refetch
   refreshKey: number;
   onContinue: (explanation: SavedExplanation) => void;
 };
 
-export default function SavedExplanationsDrawer({ reportId, refreshKey, onContinue }: Props) {
+export default function SavedExplanationsDrawer({ documentId, refreshKey, onContinue }: Props) {
   const [explanations, setExplanations] = useState<SavedExplanation[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [drawerOpen, setDrawerOpen] = useState(true);
@@ -20,14 +20,14 @@ export default function SavedExplanationsDrawer({ reportId, refreshKey, onContin
   const loadExplanations = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/reports/${reportId}/explanations`);
+      const res = await fetch(`/api/reports/${documentId}/explanations`);
       if (!res.ok) return;
       const data = await res.json() as { explanations: SavedExplanation[] };
       setExplanations(data.explanations);
     } finally {
       setLoading(false);
     }
-  }, [reportId]);
+  }, [documentId]);
 
   useEffect(() => {
     loadExplanations();
@@ -44,7 +44,7 @@ export default function SavedExplanationsDrawer({ reportId, refreshKey, onContin
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this saved explanation?')) return;
-    const res = await fetch(`/api/reports/${reportId}/explanations/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/reports/${documentId}/explanations/${id}`, { method: 'DELETE' });
     if (res.ok) {
       setExplanations(prev => prev.filter(e => e.id !== id));
     }
@@ -133,7 +133,7 @@ export default function SavedExplanationsDrawer({ reportId, refreshKey, onContin
                           fontWeight: 'bold',
                           marginBottom: '0.15rem',
                         }}>
-                          {m.role === 'assistant' ? 'ANALYST' : 'YOU'}
+                          {m.role === 'assistant' ? 'AURA' : 'YOU'}
                         </div>
                         <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.78rem' }}>
                           {m.content}

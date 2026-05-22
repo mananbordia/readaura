@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUserId } from '@/lib/auth';
-import { createReport, updateReportTextCache } from '@/lib/db';
+import { createDocument, updateDocumentTextCache } from '@/lib/db';
 import { extractText } from '@/lib/text-extract';
 import fs from 'fs';
 import path from 'path';
@@ -8,7 +8,6 @@ import crypto from 'crypto';
 
 const MAX_SIZE = 20 * 1024 * 1024; // 20MB
 const ALLOWED_TYPES = new Set(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
-const VALID_REGIONS = new Set(['US', 'IN', 'AE']);
 
 export async function POST(req: NextRequest) {
   const userId = await getSessionUserId();
@@ -19,15 +18,10 @@ export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const file = formData.get('file') as File | null;
   const title = (formData.get('title') as string)?.trim();
-  const region = (formData.get('region') as string)?.trim().toUpperCase();
   const tagsRaw = (formData.get('tags') as string) || '';
 
-  if (!file || !title || !region) {
-    return NextResponse.json({ error: 'Missing file, title, or region' }, { status: 400 });
-  }
-
-  if (!VALID_REGIONS.has(region)) {
-    return NextResponse.json({ error: 'Invalid region' }, { status: 400 });
+  if (!file || !title) {
+    return NextResponse.json({ error: 'Missing file or title' }, { status: 400 });
   }
 
   if (!ALLOWED_TYPES.has(file.type)) {
@@ -50,19 +44,17 @@ export async function POST(req: NextRequest) {
   const buffer = Buffer.from(await file.arrayBuffer());
   fs.writeFileSync(absPath, buffer);
 
-  // Insert metadata
   try {
-    createReport({ id, userId, region, title, tags, fileType, filePath, fileSize: file.size });
+    createDocument({ id, userId, title, tags, fileType, filePath, fileSize: file.size });
   } catch (err) {
-    // Clean up orphaned file
     fs.unlinkSync(absPath);
     throw err;
   }
 
   // Extract text async (fire-and-forget)
   extractText(absPath, fileType)
-    .then(text => updateReportTextCache(id, text))
+    .then(text => updateDocumentTextCache(id, text))
     .catch(() => { /* text extraction is best-effort */ });
 
-  return NextResponse.json({ id, title, region, fileType, tags, createdAt: new Date().toISOString() });
+  return NextResponse.json({ id, title, fileType, tags, createdAt: new Date().toISOString() });
 }

@@ -2,12 +2,10 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { UIMessage } from 'ai';
-import type { ResearchReport, SavedExplanation } from '@/lib/db';
-import { fetchReports, removeReport, editReport } from './actions';
+import type { Document, SavedExplanation } from '@/lib/db';
+import { fetchDocuments, removeDocument, editDocument } from './actions';
 import ExplainPopover from './ExplainPopover';
 import SavedExplanationsDrawer from './SavedExplanationsDrawer';
-
-const REGIONS = ['US', 'IN', 'AE'] as const;
 
 const TTS_VOICES = [
   { id: 'en-US-AvaMultilingualNeural', label: 'Ava (F)' },
@@ -18,16 +16,22 @@ const TTS_VOICES = [
   { id: 'en-GB-RyanNeural', label: 'Ryan (UK, M)' },
 ] as const;
 
+const WELCOME_SEEN_KEY = 'readaura-welcome-seen';
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function ReportsClient({ initialReports }: { initialReports: ResearchReport[] }) {
-  const [region, setRegion] = useState<string>('US');
-  const [reports, setReports] = useState<ResearchReport[]>(initialReports);
-  const [selectedReport, setSelectedReport] = useState<ResearchReport | null>(null);
+type Props = {
+  initialDocuments: Document[];
+  aiConfigured: boolean;
+};
+
+export default function ReportsClient({ initialDocuments, aiConfigured }: Props) {
+  const [documents, setDocuments] = useState<Document[]>(initialDocuments);
+  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
   const [showUpload, setShowUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
@@ -44,7 +48,16 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
   const [docxEditing, setDocxEditing] = useState(false);
   const [docxSaving, setDocxSaving] = useState(false);
 
-  // TTS state
+  const [showWelcome, setShowWelcome] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!localStorage.getItem(WELCOME_SEEN_KEY)) setShowWelcome(true);
+  }, []);
+  const dismissWelcome = () => {
+    if (typeof window !== 'undefined') localStorage.setItem(WELCOME_SEEN_KEY, '1');
+    setShowWelcome(false);
+  };
+
   const [ttsActive, setTtsActive] = useState(false);
   const [ttsPaused, setTtsPaused] = useState(false);
   const [ttsLoading, setTtsLoading] = useState(false);
@@ -60,7 +73,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     }
     return 1;
   });
-  // Each TTS item is either speakable text or a pause point (table/image)
   type TtsItem = { type: 'text'; text: string; element: Element | null }
     | { type: 'table' | 'image'; text: ''; element: Element | null };
   const ttsItemsRef = useRef<TtsItem[]>([]);
@@ -71,35 +83,25 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
   const [ttsPauseReason, setTtsPauseReason] = useState<'table' | 'image' | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Viewer ref for click-to-read
   const docxViewerRef = useRef<HTMLDivElement>(null);
 
-  // ---- AI explanation feature state ----
   type SelectionInfo = {
     text: string;
     contextBefore: string;
     contextAfter: string;
     rect: { top: number; left: number; width: number };
   };
-  // Live selection (drives the floating "Explain" button)
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo | null>(null);
-  // Snapshot of the selection at the moment Explain was clicked — persists
-  // while the popover is open even if the underlying selection collapses.
   const [activeSelection, setActiveSelection] = useState<SelectionInfo | null>(null);
   const [explainOpen, setExplainOpen] = useState(false);
   const [continueFromThread, setContinueFromThread] = useState<SavedExplanation | null>(null);
   const [explanationsRefreshKey, setExplanationsRefreshKey] = useState(0);
 
-  // Detect text selection inside the docx viewer.
-  // We listen on `pointerup` (fires once after the drag completes) instead of
-  // `selectionchange` (fires repeatedly during drag and causes re-renders that
-  // interfere with the in-progress selection).
   useEffect(() => {
     const viewer = docxViewerRef.current;
     if (!viewer || docxEditing) return;
 
     const handlePointerUp = () => {
-      // Run on the next tick so the browser finalizes the selection first
       setTimeout(() => {
         const selection = window.getSelection();
         if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
@@ -135,14 +137,10 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
       }, 0);
     };
 
-    // Hide the Explain button when the user clicks elsewhere (collapsing the selection)
     const handleDocumentPointerDown = (e: PointerEvent) => {
-      // If clicking inside the viewer, let pointerup handle it
       if (viewer.contains(e.target as Node)) return;
       const target = e.target as HTMLElement;
-      // If clicking on the Explain button itself, leave it alone
       if (target.closest('[data-explain-button]')) return;
-      // If clicking inside the explanation popover, leave it alone
       if (target.closest('[data-explain-popover]')) return;
       setSelectionInfo(null);
     };
@@ -157,7 +155,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
 
   const handleOpenExplain = () => {
     if (!selectionInfo) return;
-    // Snapshot the current selection so the popover has stable data
     setActiveSelection(selectionInfo);
     setContinueFromThread(null);
     setExplainOpen(true);
@@ -180,7 +177,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     setExplanationsRefreshKey(k => k + 1);
   };
 
-  // Build initial messages from a saved thread for "Continue"
   const continueInitialMessages: UIMessage[] | undefined = continueFromThread
     ? continueFromThread.messages.map((m): UIMessage => ({
         id: m.id,
@@ -189,13 +185,10 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
       }))
     : undefined;
 
-  // Track which TTS item index is active for highlighting (-1 = none)
   const [ttsHighlightIndex, setTtsHighlightIndex] = useState(-1);
   const ttsHighlightRef = useRef<HTMLElement | null>(null);
 
-  // Apply highlight after React re-renders the DOM
   useEffect(() => {
-    // Clear previous
     if (ttsHighlightRef.current) {
       ttsHighlightRef.current.style.background = '';
       ttsHighlightRef.current.style.borderLeft = '';
@@ -205,7 +198,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     if (ttsHighlightIndex < 0) return;
     const viewer = docxViewerRef.current;
     if (!viewer) return;
-    // Find the element to highlight
     let target: HTMLElement | null = null;
     const allTagged = viewer.querySelectorAll<HTMLElement>('[data-tts-index]');
     for (const el of allTagged) {
@@ -226,27 +218,16 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     }
   }, [ttsHighlightIndex, docxHtml]);
 
-  // Upload form refs
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const emptyStateFileRef = useRef<HTMLInputElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const tagsInputRef = useRef<HTMLInputElement>(null);
   const pasteInputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load reports when region changes
-  useEffect(() => {
-    fetchReports(region).then(setReports);
-  }, [region]);
-
-  const handleRegionChange = (r: string) => {
-    setRegion(r);
-    setSelectedReport(null);
-    setDocxHtml('');
-    stopTts();
-    setFilterTag(null);
-  };
-
   const handleUpload = async (droppedFiles?: File[]) => {
-    const fileList = droppedFiles || (fileInputRef.current?.files ? Array.from(fileInputRef.current.files) : []);
+    const fromForm = fileInputRef.current?.files ? Array.from(fileInputRef.current.files) : [];
+    const fromEmpty = emptyStateFileRef.current?.files ? Array.from(emptyStateFileRef.current.files) : [];
+    const fileList = droppedFiles || (fromForm.length > 0 ? fromForm : fromEmpty);
     const titleInput = titleInputRef.current?.value?.trim();
     const tagsStr = tagsInputRef.current?.value || '';
 
@@ -257,7 +238,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
 
     const files = fileList;
 
-    // Validate all files first
     for (const file of files) {
       const ext = file.name.split('.').pop()?.toLowerCase();
       if (ext !== 'pdf' && ext !== 'docx') {
@@ -271,7 +251,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     const errors: string[] = [];
 
     for (const file of files) {
-      // Use provided title for single file, or filename (without ext) for multiple
       const title = files.length === 1 && titleInput
         ? titleInput
         : titleInput
@@ -281,7 +260,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
       const formData = new FormData();
       formData.append('file', file);
       formData.append('title', title);
-      formData.append('region', region);
       formData.append('tags', tagsStr);
 
       try {
@@ -299,13 +277,13 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
       setError(errors.join('; '));
     }
 
-    // Refresh list
-    const updated = await fetchReports(region);
-    setReports(updated);
+    const updated = await fetchDocuments();
+    setDocuments(updated);
     if (errors.length === 0) {
       setShowUpload(false);
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (emptyStateFileRef.current) emptyStateFileRef.current.value = '';
     if (titleInputRef.current) titleInputRef.current.value = '';
     if (tagsInputRef.current) tagsInputRef.current.value = '';
     setUploading(false);
@@ -313,11 +291,10 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
   };
 
   const handleTxtEdit = async () => {
-    if (!selectedReport) return;
+    if (!selectedDocument) return;
     if (!txtEditing) {
-      // Enter edit mode — fetch raw text
       try {
-        const res = await fetch(`/api/reports/${selectedReport.id}/text`);
+        const res = await fetch(`/api/reports/${selectedDocument.id}/text`);
         const data = await res.json();
         setTxtEditContent(data.text || '');
         setTxtEditing(true);
@@ -327,16 +304,14 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
       }
       return;
     }
-    // Save
     setTxtSaving(true);
     try {
-      const res = await fetch(`/api/reports/${selectedReport.id}/update-text`, {
+      const res = await fetch(`/api/reports/${selectedDocument.id}/update-text`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: txtEditContent }),
       });
       if (!res.ok) { setError('Failed to save.'); return; }
-      // Re-render the viewer
       const rawHtml = txtEditContent.split(/\n\s*\n/).filter(p => p.trim()).map(p => `<p>${p.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>`).join('');
       const { html, items } = processDocxHtml(rawHtml);
       setDocxHtml(html);
@@ -349,23 +324,21 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
   };
 
   const handleDocxEdit = async () => {
-    if (!selectedReport || !docxViewerRef.current) return;
+    if (!selectedDocument || !docxViewerRef.current) return;
     if (!docxEditing) {
       setDocxEditing(true);
       stopTts();
       return;
     }
-    // Save edited HTML
     setDocxSaving(true);
     try {
       const editedHtml = docxViewerRef.current.innerHTML;
-      const res = await fetch(`/api/reports/${selectedReport.id}/html`, {
+      const res = await fetch(`/api/reports/${selectedDocument.id}/html`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ html: editedHtml }),
       });
       if (!res.ok) { setError('Failed to save.'); return; }
-      // Re-process for TTS items
       const { html, items } = processDocxHtml(editedHtml);
       setDocxHtml(html);
       ttsItemsRef.current = items;
@@ -388,14 +361,14 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
       const res = await fetch('/api/reports/upload-text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, text, region, tags: tagsStr }),
+        body: JSON.stringify({ title, text, tags: tagsStr }),
       });
       if (!res.ok) {
         const data = await res.json();
         setError(data.error || 'Upload failed');
       } else {
-        const updated = await fetchReports(region);
-        setReports(updated);
+        const updated = await fetchDocuments();
+        setDocuments(updated);
         setShowUpload(false);
         if (pasteInputRef.current) pasteInputRef.current.value = '';
         if (titleInputRef.current) titleInputRef.current.value = '';
@@ -432,19 +405,19 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     handleUpload(droppedFiles);
   };
 
-  const handleDelete = async (reportId: string) => {
-    const res = await removeReport(reportId);
+  const handleDelete = async (documentId: string) => {
+    const res = await removeDocument(documentId);
     if (res.ok) {
-      setReports(prev => prev.filter(r => r.id !== reportId));
-      if (selectedReport?.id === reportId) {
-        setSelectedReport(null);
+      setDocuments(prev => prev.filter(r => r.id !== documentId));
+      if (selectedDocument?.id === documentId) {
+        setSelectedDocument(null);
         setDocxHtml('');
         stopTts();
       }
     }
   };
 
-  const startEdit = (r: ResearchReport) => {
+  const startEdit = (r: Document) => {
     setEditingId(r.id);
     setEditTitle(r.title);
     setEditTags(r.tags.map(t => t.replace(/[\[\]]/g, '')).join(', '));
@@ -459,19 +432,18 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
   const saveEdit = async () => {
     if (!editingId || !editTitle.trim()) return;
     const tags = editTags.split(',').map(t => t.trim().toLowerCase().replace(/[\[\]]/g, '')).filter(Boolean);
-    const res = await editReport(editingId, editTitle.trim(), tags);
+    const res = await editDocument(editingId, editTitle.trim(), tags);
     if (res.ok) {
-      setReports(prev => prev.map(r =>
+      setDocuments(prev => prev.map(r =>
         r.id === editingId ? { ...r, title: editTitle.trim(), tags } : r
       ));
-      if (selectedReport?.id === editingId) {
-        setSelectedReport(prev => prev ? { ...prev, title: editTitle.trim(), tags } : prev);
+      if (selectedDocument?.id === editingId) {
+        setSelectedDocument(prev => prev ? { ...prev, title: editTitle.trim(), tags } : prev);
       }
     }
     cancelEdit();
   };
 
-  // Split long text into chunks at sentence boundaries (max ~500 chars each)
   const splitLongText = (text: string, maxLen = 500): string[] => {
     if (text.length <= maxLen) return [text];
     const sentences = text.match(/[^.!?]+[.!?]+[\s)]*/g) || [text];
@@ -488,14 +460,11 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     return chunks.length > 0 ? chunks : [text];
   };
 
-  // Inject data-tts-index attributes into the HTML string so they survive React re-renders.
-  // Also builds the TTS items list from the same pass.
-  // Long paragraphs are split into multiple TTS items (all sharing the same data-tts-index).
   const processDocxHtml = useCallback((rawHtml: string): { html: string; items: TtsItem[] } => {
     const items: TtsItem[] = [];
     const parser = new DOMParser();
-    const doc = parser.parseFromString(`<div>${rawHtml}</div>`, 'text/html');
-    const container = doc.body.firstElementChild!;
+    const docDom = parser.parseFromString(`<div>${rawHtml}</div>`, 'text/html');
+    const container = docDom.body.firstElementChild!;
     const allEls = container.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, table');
 
     for (const el of allEls) {
@@ -516,7 +485,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
 
       const text = (el.textContent || '').trim();
       if (text.length > 0) {
-        // Point the DOM element at the first chunk's index
         el.setAttribute('data-tts-index', String(items.length));
         const chunks = splitLongText(text);
         for (const chunk of chunks) {
@@ -529,16 +497,16 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     return { html, items };
   }, []);
 
-  const handleView = async (report: ResearchReport) => {
+  const handleView = async (doc: Document) => {
     stopTts();
-    setSelectedReport(report);
+    setSelectedDocument(doc);
     setExpanded(true);
     setDocxHtml('');
     ttsItemsRef.current = [];
 
-    if (report.fileType === 'docx') {
+    if (doc.fileType === 'docx') {
       try {
-        const res = await fetch(`/api/reports/${report.id}/html`);
+        const res = await fetch(`/api/reports/${doc.id}/html`);
         const data = await res.json();
         const rawHtml = data.html || '';
         const { html, items } = processDocxHtml(rawHtml);
@@ -547,9 +515,9 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
       } catch {
         setDocxHtml('<p>Failed to load document.</p>');
       }
-    } else if (report.fileType === 'txt') {
+    } else if (doc.fileType === 'txt') {
       try {
-        const res = await fetch(`/api/reports/${report.id}/text`);
+        const res = await fetch(`/api/reports/${doc.id}/text`);
         const data = await res.json();
         const text = data.text || '';
         const rawHtml = text.split(/\n\s*\n/).filter((p: string) => p.trim()).map((p: string) => `<p>${p.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>`).join('');
@@ -562,10 +530,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     }
   };
 
-  // ---- TTS via Edge TTS (Azure Neural Voices) ----
-
-  // Cache audio as base64 data URLs to avoid Chrome's blob URL range request bug
-  // (ERR_REQUEST_RANGE_NOT_SATISFIABLE)
   const audioCacheRef = useRef<Map<string, string>>(new Map());
 
   const fetchParaAudio = useCallback(async (text: string, voice: string): Promise<string> => {
@@ -581,20 +545,17 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     if (!res.ok) throw new Error('TTS failed');
     const blob = await res.blob();
     if (blob.size === 0) throw new Error('TTS returned empty audio');
-    // Convert to data URL — immune to Chrome's range request issues
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
-    // Validate: a valid MP3 data URL should be at least ~100 chars
     if (dataUrl.length < 100) throw new Error('TTS returned invalid audio');
     audioCacheRef.current.set(cacheKey, dataUrl);
     return dataUrl;
   }, []);
 
-  // Speak a paragraph by index using the Audio element
   const speakFnRef = useRef<(index: number) => void>(() => {});
 
   useEffect(() => {
@@ -615,7 +576,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
 
       const item = items[index];
 
-      // Auto-pause at table/image items
       if (item.type === 'table' || item.type === 'image') {
         setTtsLoading(false);
         setTtsPaused(true);
@@ -629,10 +589,8 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
         const voice = ttsVoice;
         const audioUrl = await fetchParaAudio(item.text, voice);
 
-        // Abort if a newer invocation has started
         if (gen !== ttsGenRef.current || ttsCancelledRef.current) return;
 
-        // Pre-fetch next few text items in background
         let prefetched = 0;
         for (let next = index + 1; next < items.length && prefetched < 3; next++) {
           if (items[next].type === 'text') {
@@ -644,16 +602,12 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
         const audio = audioRef.current;
         if (!audio) return;
 
-        // Clear previous handlers to prevent stale callbacks
         audio.onended = null;
         audio.onerror = null;
         audio.src = audioUrl;
         audio.playbackRate = ttsRate;
         setTtsLoading(false);
 
-        // Only use onended for normal progression — errors are handled by the
-        // catch block from audio.play(). Using both onerror AND catch causes
-        // cascading duplicate calls.
         audio.onended = () => {
           if (gen === ttsGenRef.current && !ttsCancelledRef.current) {
             speakFnRef.current(index + 1);
@@ -663,7 +617,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
         await audio.play();
       } catch {
         setTtsLoading(false);
-        // Only advance if we're still the active generation
         if (gen === ttsGenRef.current && !ttsCancelledRef.current) {
           speakFnRef.current(index + 1);
         }
@@ -689,9 +642,8 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     setTtsProgress({ current: 0, total: 0 });
   };
 
-
   const handleReadAloud = async () => {
-    if (!selectedReport) return;
+    if (!selectedDocument) return;
 
     if (ttsActive && !ttsPaused) {
       audioRef.current?.pause();
@@ -712,15 +664,13 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     }
 
     try {
-      if (selectedReport.fileType === 'docx' || selectedReport.fileType === 'txt') {
-        // Items already built when HTML was loaded in handleView
+      if (selectedDocument.fileType === 'docx' || selectedDocument.fileType === 'txt') {
         if (ttsItemsRef.current.length === 0) {
           setError('No content found to read.');
           return;
         }
       } else {
-        // PDF: use text extraction API
-        const res = await fetch(`/api/reports/${selectedReport.id}/text`);
+        const res = await fetch(`/api/reports/${selectedDocument.id}/text`);
         const data = await res.json();
         const text = data.text || '';
         if (!text.trim()) {
@@ -741,7 +691,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
       setTtsActive(true);
       setTtsPaused(false);
 
-      // Pre-fetch first few text items while the first one plays
       const voice = ttsVoice;
       let prefetched = 0;
       for (let i = 1; i < ttsItemsRef.current.length && prefetched < 3; i++) {
@@ -757,12 +706,9 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     }
   };
 
-  // Click-to-read: use data-tts-index attribute stamped on DOM elements
   const handleDocxClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!ttsActive || ttsItemsRef.current.length === 0) return;
 
-    // If the user just finished selecting text, the click event is part of
-    // that selection — don't hijack it as a TTS jump.
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed && selection.toString().trim().length > 0) {
       return;
@@ -785,7 +731,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     setTtsPaused(false);
     setTtsPauseReason(null);
 
-    // Pre-fetch next few items from the jump point
     const voice = ttsVoice;
     let prefetched = 0;
     for (let i = itemIndex + 1; i < ttsItemsRef.current.length && prefetched < 3; i++) {
@@ -798,7 +743,6 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     speakFnRef.current(itemIndex);
   };
 
-  // Cleanup TTS on unmount
   useEffect(() => {
     const audio = audioRef.current;
     const cache = audioCacheRef.current;
@@ -811,9 +755,9 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
     };
   }, []);
 
-  // Collect all unique tags
-  const allTags = Array.from(new Set(reports.flatMap(r => r.tags)));
-  const displayed = filterTag ? reports.filter(r => r.tags.includes(filterTag)) : reports;
+  const allTags = Array.from(new Set(documents.flatMap(r => r.tags)));
+  const displayed = filterTag ? documents.filter(r => r.tags.includes(filterTag)) : documents;
+  const libraryIsEmpty = documents.length === 0;
 
   return (
     <div
@@ -834,78 +778,116 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
           DROP PDF / DOCX FILES HERE
         </div>
       )}
-      {!expanded && (
-        <h2 style={{ marginBottom: '1rem' }}>&gt; RESEARCH REPORTS</h2>
-      )}
 
-      {/* Region tabs */}
-      {!expanded && <div className="card" style={{ marginBottom: '1rem' }}>
-        <div className="form-row" style={{ marginBottom: '0.75rem' }}>
-          {REGIONS.map(r => (
-            <button
-              key={r}
-              onClick={() => handleRegionChange(r)}
-              style={{
-                fontSize: '0.9rem',
-                background: region === r ? 'var(--term-fg)' : 'transparent',
-                color: region === r ? 'var(--term-bg)' : 'var(--term-fg)',
-                marginRight: '0.5rem',
-              }}
-            >{r}</button>
-          ))}
-          <div style={{ flex: 1 }} />
-          <button
-            onClick={() => setShowUpload(v => !v)}
-            style={{
-              fontSize: '0.85rem',
-              background: showUpload ? 'var(--term-fg)' : 'transparent',
-              color: showUpload ? 'var(--term-bg)' : 'var(--term-fg)',
-            }}
-          >UPLOAD REPORT</button>
-        </div>
-
-        {/* Upload form */}
-        {showUpload && (
-          <div style={{ borderTop: '1px dashed var(--term-dim)', paddingTop: '0.75rem' }}>
-            <div className="form-row" style={{ marginBottom: '0.5rem' }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: '0.85rem', color: 'var(--term-dim)' }}>&gt; TITLE (optional for multi-upload):</label>
-                <input ref={titleInputRef} placeholder="Report title..." style={{ width: '100%' }} />
-              </div>
-            </div>
-            <div className="form-row" style={{ marginBottom: '0.5rem' }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: '0.85rem', color: 'var(--term-dim)' }}>&gt; TAGS (comma-separated):</label>
-                <input ref={tagsInputRef} placeholder="earnings, sector-analysis, ipo..." style={{ width: '100%' }} />
-              </div>
-            </div>
-            <div className="form-row" style={{ marginBottom: '0.5rem', alignItems: 'center' }}>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.docx"
-                multiple
-                style={{ flex: 1, fontSize: '0.85rem' }}
-              />
-              <button onClick={() => handleUpload()} disabled={uploading}>
-                {uploading ? 'UPLOADING...' : 'UPLOAD FILE'}
-              </button>
-            </div>
-            <div style={{ borderTop: '1px dashed var(--term-dim)', paddingTop: '0.5rem', marginTop: '0.5rem' }}>
-              <label style={{ fontSize: '0.85rem', color: 'var(--term-dim)' }}>&gt; OR PASTE TEXT:</label>
-              <textarea
-                ref={pasteInputRef}
-                placeholder="Paste report text here..."
-                rows={4}
-                style={{ width: '100%', fontSize: '0.85rem', fontFamily: 'var(--font-mono)', background: 'var(--term-bg)', color: 'var(--term-fg)', border: '1px solid var(--term-dim)', padding: '0.5rem', resize: 'vertical' }}
-              />
-              <button onClick={handlePasteUpload} disabled={uploading} style={{ marginTop: '0.3rem' }}>
-                {uploading ? 'UPLOADING...' : 'SAVE TEXT'}
-              </button>
+      {/* Welcome modal (first run) */}
+      {showWelcome && (
+        <div
+          className="modal-backdrop"
+          onClick={dismissWelcome}
+          role="dialog"
+          aria-label="Welcome to ReadAura"
+        >
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2>&gt; WELCOME TO READAURA</h2>
+            <p style={{ marginBottom: '1rem' }}>
+              A local-first reader for PDFs, Word docs, and pasted text. Three things to try:
+            </p>
+            <ol style={{ paddingLeft: '1.25rem', lineHeight: 1.7, marginBottom: '1rem' }}>
+              <li><strong>Upload</strong> — drop a PDF or DOCX anywhere on this page, or use UPLOAD DOCUMENT.</li>
+              <li><strong>Highlight</strong> — select any passage in the viewer to get an AI explanation, with multi-turn follow-ups.</li>
+              <li><strong>Read aloud</strong> — press READ ALOUD for neural-voice TTS, with click-to-jump and paragraph highlighting.</li>
+            </ol>
+            {!aiConfigured && (
+              <p style={{ fontSize: '0.85rem', color: 'var(--term-alert)', marginBottom: '1rem' }}>
+                Heads up: AI explanations need an <code>NVIDIA_API_KEY</code> in your <code>.env.local</code>. Get a free one at <a href="https://build.nvidia.com/" target="_blank" rel="noopener noreferrer">build.nvidia.com</a>.
+              </p>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={dismissWelcome}>GOT IT</button>
             </div>
           </div>
-        )}
-      </div>}
+        </div>
+      )}
+
+      {!expanded && (
+        <h2 style={{ marginBottom: '1rem' }}>&gt; LIBRARY</h2>
+      )}
+
+      {/* Missing API key banner */}
+      {!expanded && !aiConfigured && (
+        <div
+          className="card"
+          style={{
+            borderColor: 'var(--term-alert)',
+            color: 'var(--term-alert)',
+            marginBottom: '1rem',
+            fontSize: '0.85rem',
+          }}
+        >
+          <strong>⚠ AI EXPLANATIONS DISABLED.</strong> Set <code>NVIDIA_API_KEY</code> in <code>.env.local</code> to enable highlight-to-explain. Get a free key at{' '}
+          <a href="https://build.nvidia.com/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--term-alert)', borderBottomColor: 'var(--term-alert)' }}>
+            build.nvidia.com
+          </a>. Uploading, reading, and TTS work without it.
+        </div>
+      )}
+
+      {/* Top action bar */}
+      {!expanded && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <div className="form-row" style={{ marginBottom: showUpload ? '0.75rem' : 0 }}>
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={() => setShowUpload(v => !v)}
+              style={{
+                fontSize: '0.85rem',
+                background: showUpload ? 'var(--term-fg)' : 'transparent',
+                color: showUpload ? 'var(--term-bg)' : 'var(--term-fg)',
+              }}
+            >UPLOAD DOCUMENT</button>
+          </div>
+
+          {showUpload && (
+            <div style={{ borderTop: '1px dashed var(--term-dim)', paddingTop: '0.75rem' }}>
+              <div className="form-row" style={{ marginBottom: '0.5rem' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.85rem', color: 'var(--term-dim)' }}>&gt; TITLE (optional for multi-upload):</label>
+                  <input ref={titleInputRef} placeholder="Document title..." style={{ width: '100%' }} />
+                </div>
+              </div>
+              <div className="form-row" style={{ marginBottom: '0.5rem' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.85rem', color: 'var(--term-dim)' }}>&gt; TAGS (comma-separated):</label>
+                  <input ref={tagsInputRef} placeholder="research, philosophy, biology..." style={{ width: '100%' }} />
+                </div>
+              </div>
+              <div className="form-row" style={{ marginBottom: '0.5rem', alignItems: 'center' }}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.docx"
+                  multiple
+                  style={{ flex: 1, fontSize: '0.85rem' }}
+                />
+                <button onClick={() => handleUpload()} disabled={uploading}>
+                  {uploading ? 'UPLOADING...' : 'UPLOAD FILE'}
+                </button>
+              </div>
+              <div style={{ borderTop: '1px dashed var(--term-dim)', paddingTop: '0.5rem', marginTop: '0.5rem' }}>
+                <label style={{ fontSize: '0.85rem', color: 'var(--term-dim)' }}>&gt; OR PASTE TEXT:</label>
+                <textarea
+                  ref={pasteInputRef}
+                  placeholder="Paste document text here..."
+                  rows={4}
+                  style={{ width: '100%', fontSize: '0.85rem', fontFamily: 'var(--font-mono)', background: 'var(--term-bg)', color: 'var(--term-fg)', border: '1px solid var(--term-dim)', padding: '0.5rem', resize: 'vertical' }}
+                />
+                <button onClick={handlePasteUpload} disabled={uploading} style={{ marginTop: '0.3rem' }}>
+                  {uploading ? 'UPLOADING...' : 'SAVE TEXT'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {error && (
         <div style={{ color: 'var(--term-alert)', marginBottom: '0.75rem', fontSize: '0.85rem' }}>
@@ -938,109 +920,138 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
         </div>
       )}
 
-      {/* Reports table */}
-      {!expanded && <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
-        <table style={{ width: '100%', fontSize: '0.85rem' }}>
-          <thead>
-            <tr>
-              <th style={{ textAlign: 'left' }}>TITLE</th>
-              <th style={{ textAlign: 'left' }}>BY</th>
-              <th style={{ textAlign: 'left' }}>TYPE</th>
-              <th style={{ textAlign: 'left' }} className="hide-mobile">TAGS</th>
-              <th style={{ textAlign: 'left' }} className="hide-mobile">DATE</th>
-              <th style={{ textAlign: 'left' }} className="hide-mobile">SIZE</th>
-              <th style={{ textAlign: 'right' }}>ACTIONS</th>
-            </tr>
-          </thead>
-          <tbody>
-            {displayed.length === 0 ? (
+      {/* Empty state — shown when library has zero documents */}
+      {!expanded && libraryIsEmpty && (
+        <div
+          className="card"
+          style={{
+            textAlign: 'center',
+            padding: '2.5rem 1.5rem',
+            borderStyle: 'dashed',
+            borderColor: 'var(--term-dim)',
+          }}
+        >
+          <div style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>&gt; LIBRARY IS EMPTY</div>
+          <div style={{ color: 'var(--term-dim)', marginBottom: '1rem', fontSize: '0.9rem' }}>
+            Drop your first PDF or DOCX anywhere on this page, or choose a file below.
+          </div>
+          <button onClick={() => emptyStateFileRef.current?.click()} style={{ fontSize: '0.9rem' }}>
+            CHOOSE FILE
+          </button>
+          <input
+            ref={emptyStateFileRef}
+            type="file"
+            accept=".pdf,.docx"
+            multiple
+            style={{ display: 'none' }}
+            onChange={() => handleUpload()}
+          />
+        </div>
+      )}
+
+      {/* Documents table */}
+      {!expanded && !libraryIsEmpty && (
+        <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
+          <table style={{ width: '100%', fontSize: '0.85rem' }}>
+            <thead>
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', color: 'var(--term-dim)', padding: '2rem' }}>
-                  No reports uploaded for {region} region.
-                </td>
+                <th style={{ textAlign: 'left' }}>TITLE</th>
+                <th style={{ textAlign: 'left' }}>TYPE</th>
+                <th style={{ textAlign: 'left' }} className="hide-mobile">TAGS</th>
+                <th style={{ textAlign: 'left' }} className="hide-mobile">DATE</th>
+                <th style={{ textAlign: 'left' }} className="hide-mobile">SIZE</th>
+                <th style={{ textAlign: 'right' }}>ACTIONS</th>
               </tr>
-            ) : displayed.map(r => (
-              <tr
-                key={r.id}
-                style={{
-                  cursor: editingId === r.id ? 'default' : 'pointer',
-                  background: selectedReport?.id === r.id ? 'rgba(51, 255, 0, 0.1)' : undefined,
-                }}
-                onClick={() => { if (editingId !== r.id) handleView(r); }}
-              >
-                {editingId === r.id ? (
-                  <>
-                    <td colSpan={2}>
-                      <input
-                        value={editTitle}
-                        onChange={e => setEditTitle(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
-                        style={{ width: '100%', fontSize: '0.85rem' }}
-                        autoFocus
-                      />
-                    </td>
-                    <td>{r.fileType.toUpperCase()}</td>
-                    <td className="hide-mobile">
-                      <input
-                        value={editTags}
-                        onChange={e => setEditTags(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
-                        placeholder="tag1, tag2..."
-                        style={{ width: '100%', fontSize: '0.85rem' }}
-                      />
-                    </td>
-                    <td className="hide-mobile">{r.createdAt.slice(0, 10)}</td>
-                    <td className="hide-mobile">{formatFileSize(r.fileSize)}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); saveEdit(); }}
-                        style={{ fontSize: '0.75rem', marginRight: '0.3rem' }}
-                      >SAVE</button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); cancelEdit(); }}
-                        style={{ fontSize: '0.75rem' }}
-                      >CANCEL</button>
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td><strong>{r.title}</strong></td>
-                    <td style={{ color: 'var(--term-dim)' }}>{r.username}</td>
-                    <td>{r.fileType.toUpperCase()}</td>
-                    <td className="hide-mobile" style={{ color: 'var(--term-dim)' }}>
-                      {r.tags.join(', ')}
-                    </td>
-                    <td className="hide-mobile">{r.createdAt.slice(0, 10)}</td>
-                    <td className="hide-mobile">{formatFileSize(r.fileSize)}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleView(r); }}
-                        style={{ fontSize: '0.75rem', marginRight: '0.3rem' }}
-                      >VIEW</button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); startEdit(r); }}
-                        style={{ fontSize: '0.75rem', marginRight: '0.3rem' }}
-                      >EDIT</button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDelete(r.id); }}
-                        style={{ fontSize: '0.75rem', color: 'var(--term-alert)' }}
-                      >DEL</button>
-                    </td>
-                  </>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>}
+            </thead>
+            <tbody>
+              {displayed.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--term-dim)', padding: '2rem' }}>
+                    No documents match this tag.
+                  </td>
+                </tr>
+              ) : displayed.map(r => (
+                <tr
+                  key={r.id}
+                  style={{
+                    cursor: editingId === r.id ? 'default' : 'pointer',
+                    background: selectedDocument?.id === r.id ? 'rgba(51, 255, 0, 0.1)' : undefined,
+                  }}
+                  onClick={() => { if (editingId !== r.id) handleView(r); }}
+                >
+                  {editingId === r.id ? (
+                    <>
+                      <td>
+                        <input
+                          value={editTitle}
+                          onChange={e => setEditTitle(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                          style={{ width: '100%', fontSize: '0.85rem' }}
+                          autoFocus
+                        />
+                      </td>
+                      <td>{r.fileType.toUpperCase()}</td>
+                      <td className="hide-mobile">
+                        <input
+                          value={editTags}
+                          onChange={e => setEditTags(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                          placeholder="tag1, tag2..."
+                          style={{ width: '100%', fontSize: '0.85rem' }}
+                        />
+                      </td>
+                      <td className="hide-mobile">{r.createdAt.slice(0, 10)}</td>
+                      <td className="hide-mobile">{formatFileSize(r.fileSize)}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); saveEdit(); }}
+                          style={{ fontSize: '0.75rem', marginRight: '0.3rem' }}
+                        >SAVE</button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); cancelEdit(); }}
+                          style={{ fontSize: '0.75rem' }}
+                        >CANCEL</button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td><strong>{r.title}</strong></td>
+                      <td>{r.fileType.toUpperCase()}</td>
+                      <td className="hide-mobile" style={{ color: 'var(--term-dim)' }}>
+                        {r.tags.join(', ')}
+                      </td>
+                      <td className="hide-mobile">{r.createdAt.slice(0, 10)}</td>
+                      <td className="hide-mobile">{formatFileSize(r.fileSize)}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleView(r); }}
+                          style={{ fontSize: '0.75rem', marginRight: '0.3rem' }}
+                        >VIEW</button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startEdit(r); }}
+                          style={{ fontSize: '0.75rem', marginRight: '0.3rem' }}
+                        >EDIT</button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDelete(r.id); }}
+                          style={{ fontSize: '0.75rem', color: 'var(--term-alert)' }}
+                        >DEL</button>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Document viewer */}
-      {selectedReport && (
+      {selectedDocument && (
         <div className="card" style={{ marginBottom: '1rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <h4>{selectedReport.title}</h4>
+            <h4>{selectedDocument.title}</h4>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
-              {selectedReport.fileType === 'txt' && (
+              {selectedDocument.fileType === 'txt' && (
                 <button
                   onClick={handleTxtEdit}
                   disabled={txtSaving}
@@ -1050,7 +1061,7 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
               {txtEditing && (
                 <button onClick={() => setTxtEditing(false)} style={{ fontSize: '0.85rem', color: 'var(--term-dim)' }}>CANCEL</button>
               )}
-              {selectedReport.fileType === 'docx' && (
+              {selectedDocument.fileType === 'docx' && (
                 <button
                   onClick={handleDocxEdit}
                   disabled={docxSaving}
@@ -1060,7 +1071,7 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
               {docxEditing && (
                 <button onClick={() => setDocxEditing(false)} style={{ fontSize: '0.85rem', color: 'var(--term-dim)' }}>CANCEL</button>
               )}
-              <button onClick={() => { setSelectedReport(null); setDocxHtml(''); stopTts(); setExpanded(false); setTxtEditing(false); setDocxEditing(false); }} style={{ fontSize: '0.85rem' }}>BACK</button>
+              <button onClick={() => { setSelectedDocument(null); setDocxHtml(''); stopTts(); setExpanded(false); setTxtEditing(false); setDocxEditing(false); }} style={{ fontSize: '0.85rem' }}>BACK</button>
             </div>
           </div>
 
@@ -1116,7 +1127,7 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
                 PARAGRAPH {ttsProgress.current}/{ttsProgress.total}
                 {ttsPauseReason === 'table' && ' | PAUSED AT TABLE — PRESS RESUME TO CONTINUE'}
                 {ttsPauseReason === 'image' && ' | PAUSED AT IMAGE — PRESS RESUME TO CONTINUE'}
-                {!ttsPaused && (selectedReport?.fileType === 'docx' || selectedReport?.fileType === 'txt') && ' | CLICK TEXT TO JUMP'}
+                {!ttsPaused && (selectedDocument?.fileType === 'docx' || selectedDocument?.fileType === 'txt') && ' | CLICK TEXT TO JUMP'}
               </span>
             )}
           </div>
@@ -1124,22 +1135,21 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
           <audio ref={audioRef} style={{ display: 'none' }} />
 
           {/* PDF viewer */}
-          {selectedReport.fileType === 'pdf' && (
+          {selectedDocument.fileType === 'pdf' && (
             <iframe
-              src={`/api/reports/${selectedReport.id}/file`}
+              src={`/api/reports/${selectedDocument.id}/file`}
               style={{
                 width: '100%',
                 height: expanded ? '85vh' : '70vh',
                 border: '2px solid var(--term-fg)',
                 background: '#fff',
               }}
-              title={selectedReport.title}
+              title={selectedDocument.title}
             />
           )}
 
-          {/* DOCX / TXT viewer */}
           {/* DOCX / TXT content area */}
-          {(selectedReport.fileType === 'docx' || selectedReport.fileType === 'txt') && (
+          {(selectedDocument.fileType === 'docx' || selectedDocument.fileType === 'txt') && (
             txtEditing ? (
               <textarea
                 value={txtEditContent}
@@ -1186,10 +1196,10 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
             )
           )}
 
-          {/* Saved AI Explanations drawer (only shown when viewing a docx report) */}
-          {selectedReport && docxHtml && !docxEditing && (
+          {/* Saved AI Explanations drawer */}
+          {selectedDocument && docxHtml && !docxEditing && (
             <SavedExplanationsDrawer
-              reportId={selectedReport.id}
+              documentId={selectedDocument.id}
               refreshKey={explanationsRefreshKey}
               onContinue={handleContinueExplanation}
             />
@@ -1222,10 +1232,10 @@ export default function ReportsClient({ initialReports }: { initialReports: Rese
       )}
 
       {/* Explanation popover */}
-      {explainOpen && selectedReport && (continueFromThread || activeSelection) && (
+      {explainOpen && selectedDocument && (continueFromThread || activeSelection) && (
         <ExplainPopover
-          reportId={selectedReport.id}
-          reportTitle={selectedReport.title}
+          documentId={selectedDocument.id}
+          documentTitle={selectedDocument.title}
           selectedText={continueFromThread?.selectedText ?? activeSelection!.text}
           contextBefore={continueFromThread?.contextBefore ?? activeSelection!.contextBefore}
           contextAfter={continueFromThread?.contextAfter ?? activeSelection!.contextAfter}

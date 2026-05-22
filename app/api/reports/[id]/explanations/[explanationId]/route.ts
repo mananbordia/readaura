@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUserId } from '@/lib/auth';
-import { getReportById, getExplanationById, appendExplanationMessages, deleteExplanation } from '@/lib/db';
+import { getDocumentById, getExplanationById, appendExplanationMessages, deleteExplanation } from '@/lib/db';
 
 const MAX_MESSAGES_TOTAL = 20;
 const MAX_MESSAGE_CONTENT = 4000;
@@ -23,14 +23,14 @@ export async function PATCH(
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { id: reportId, explanationId } = await params;
-  const report = getReportById(reportId);
-  if (!report || report.userId !== userId) {
+  const { id: documentId, explanationId } = await params;
+  const doc = getDocumentById(documentId);
+  if (!doc || doc.userId !== userId) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
   const existing = getExplanationById(explanationId, userId);
-  if (!existing || existing.reportId !== reportId) {
+  if (!existing || existing.documentId !== documentId) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
@@ -61,14 +61,14 @@ export async function DELETE(
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { id: reportId, explanationId } = await params;
-  const report = getReportById(reportId);
-  if (!report || report.userId !== userId) {
+  const { id: documentId, explanationId } = await params;
+  const doc = getDocumentById(documentId);
+  if (!doc || doc.userId !== userId) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
   const existing = getExplanationById(explanationId, userId);
-  if (!existing || existing.reportId !== reportId) {
+  if (!existing || existing.documentId !== documentId) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
