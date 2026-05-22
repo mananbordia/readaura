@@ -1,48 +1,43 @@
 # ReadAura — Roadmap
 
-A pragmatic roadmap, organized by what unblocks an open-source release, then what makes the product genuinely better, then ambitious bets. Tracking issues will live on GitHub once the repo is published — this file captures the shape of the work.
+A pragmatic roadmap, organized by what unblocks an open-source release, then what makes the product genuinely better, then ambitious bets.
 
 ---
 
 ## Phase 0 — Where we are today
 
-- Next.js 16 App Router + React 19 + TypeScript scaffold
-- SQLite (better-sqlite3) auto-init with 4 tables; seeded `local` user
-- Reports feature ported as-is: upload, view (PDF/DOCX/TXT), inline edit, drag-and-drop
-- AI explain-on-selection with multi-turn chat (NVIDIA NIM, Llama 3.3 70B)
-- Saved explanations drawer with thread continuation
+- Next.js 16 App Router + React 19 + TypeScript scaffold, Tailwind v4 with shadcn-style primitives
+- **Stateless**: every document, edit, and saved explanation lives in the user's browser IndexedDB. No database, no filesystem on the server.
+- PDF / DOCX / TXT viewer with selection-anchored AI explanations (NVIDIA NIM, Llama 3.3 70B) and multi-turn saved threads
+- PDF.js text-layer rendering preserves original PDF layout; DOCX renders in-browser via mammoth
 - TTS read-aloud with paragraph highlighting, speed control, click-to-jump, table/image pause
-- No auth — single-user local-first
-- Clean `tsc` build; `npm run dev` boots
+- Three themes (light / dark / CRT) with anti-flash inline script
+- NVIDIA API key lives in the user's localStorage (Settings dialog); env-var fallback for shared deployments
+- Library polish: search, sort, tag autocomplete, bulk tag edit, mobile-friendly layout
+- Deployed on Vercel (https://readaura-ai.vercel.app), GitHub Actions CI on every PR
 
 ---
 
 ## Phase 1 — OSS launch (must-have)
 
-The bar is: a stranger can `git clone`, fill one env var, and have a tool they actually want to use.
-
 ### 1.3 Distribution
-- [ ] Demo GIF/screenshots in the README.
+- [ ] Demo GIF / screenshots in the README.
 
 ### 1.4 Quality basics
-- [ ] Vitest setup with smoke tests for: file extract, DB queries, explain rate-limit logic.
+- [ ] Vitest setup with smoke tests for: storage layer, explain rate-limit logic, DOCX/PDF conversion.
 - [ ] Playwright smoke test: upload → view → highlight → save explanation.
-- [ ] Basic error boundary on the reports page so a bad doc doesn't break the whole app.
+- [ ] Error boundary on the library page so a bad doc doesn't break the whole app.
 
 ---
 
 ## Phase 2 — Make it genuinely useful (next 4–8 weeks of part-time work)
 
-These features compound the value of the existing surface.
-
 ### 2.1 LLM provider abstraction
-Right now NVIDIA is hardcoded. Move to a single `OPENAI_BASE_URL` + `OPENAI_API_KEY` + `MODEL` env-var trio so users can plug in OpenAI, Groq, Together, OpenRouter, Anthropic-via-proxy, or local Ollama. Ship NVIDIA as the default preset.
+NVIDIA is the only supported provider today. Move to a single `OPENAI_BASE_URL` + `OPENAI_API_KEY` + `MODEL` env-var trio so users can plug in OpenAI, Groq, Together, OpenRouter, Anthropic-via-proxy, or local Ollama. Ship NVIDIA as the default preset.
 
 ### 2.2 Library improvements
-- [ ] Full-text search across all documents (SQLite FTS5).
-- [ ] Tag autocomplete + bulk tag editor.
-- [ ] Reading progress per document (track last-read paragraph).
-- [ ] Sort: date added, last opened, title, size.
+- [ ] Reading progress per document (track last-read paragraph, sort by last-opened).
+- [ ] Ranked / fuzzy search instead of the current substring filter.
 
 ### 2.3 Annotations beyond explanations
 - [ ] Plain highlights without an AI conversation (color-coded).
@@ -60,8 +55,6 @@ Right now NVIDIA is hardcoded. Move to a single `OPENAI_BASE_URL` + `OPENAI_API_
 - [ ] Export the current document as an MP3 audiobook.
 
 ### 2.6 UX polish
-- [ ] Mobile-friendly viewer (current layout assumes desktop).
-- [ ] Theme toggle (CRT terminal theme is striking but divisive — offer a clean light theme).
 - [ ] Keyboard shortcut overlay (`?` to show all bindings).
 
 ---
@@ -92,13 +85,5 @@ First-class support for Ollama / llama.cpp so the whole stack runs offline. Docu
 ## Non-goals (for now)
 
 - Real-time collaborative annotation
-- A mobile app (PWA via the mobile-friendly viewer is enough)
-- A hosted SaaS — ReadAura is self-host-first; if a hosted version ever happens it'd be a separate project
-
----
-
-## Open questions
-
-- **Naming the doc model**: keep "report" terminology (familiar to clash-fund roots, but finance-coded), use "document" (generic), or "paper" (academic-coded)? Leaning **document**.
-- **Region/collection**: drop entirely in favor of tags, or keep as a first-class concept? Tags are simpler.
-- **License**: MIT vs Apache-2.0 vs AGPL? MIT for maximum adoption; AGPL if the long-term plan is a hosted commercial version.
+- A native mobile app (the responsive web viewer is enough)
+- A hosted multi-user SaaS — the deployed Vercel instance is a convenience demo; ReadAura's design point is local-first and self-hostable
