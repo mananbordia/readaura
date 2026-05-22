@@ -4,12 +4,6 @@ import { getDocumentById } from '@/lib/db';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { streamText, convertToModelMessages, type UIMessage } from 'ai';
 
-const nvidia = createOpenAICompatible({
-  name: 'nvidia',
-  baseURL: 'https://integrate.api.nvidia.com/v1',
-  apiKey: process.env.NVIDIA_API_KEY,
-});
-
 const MAX_SELECTED_TEXT = 2000;
 const MAX_CONTEXT = 2000;
 const MAX_MESSAGES = 20;
@@ -22,7 +16,6 @@ const requestLog = new Map<string, number[]>();
 function checkRateLimit(userId: string): { ok: boolean; retryAfter?: number } {
   const now = Date.now();
   const log = requestLog.get(userId) ?? [];
-  // Drop entries older than 1 hour
   const recent = log.filter(t => now - t < 60 * 60 * 1000);
   const lastMinute = recent.filter(t => now - t < 60 * 1000).length;
 
@@ -40,10 +33,6 @@ function checkRateLimit(userId: string): { ok: boolean; retryAfter?: number } {
 export async function POST(req: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  if (!process.env.NVIDIA_API_KEY) {
-    return NextResponse.json({ error: 'AI not configured: missing NVIDIA_API_KEY' }, { status: 503 });
-  }
 
   const rate = checkRateLimit(userId);
   if (!rate.ok) {
@@ -66,7 +55,21 @@ export async function POST(req: NextRequest) {
     contextBefore,
     contextAfter,
     messages,
+    apiKey: userApiKey,
   } = body as Record<string, unknown>;
+
+  // Prefer the user-supplied key from localStorage; fall back to env so existing
+  // self-hosted setups still work without forcing a settings round-trip.
+  const clientKey = typeof userApiKey === 'string' ? userApiKey.trim() : '';
+  const envKey = (process.env.NVIDIA_API_KEY ?? '').trim();
+  const apiKey = clientKey || envKey;
+
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: 'AI not configured. Add your NVIDIA API key in Settings to enable explanations.' },
+      { status: 503 },
+    );
+  }
 
   if (typeof reportId !== 'string') {
     return NextResponse.json({ error: 'Invalid reportId' }, { status: 400 });
@@ -103,8 +106,6 @@ Your job is to help the user understand this passage. On the first turn, provide
 On follow-up turns, answer the user's specific question while staying anchored to the highlighted passage and the document context. If a question goes outside the scope of the document, briefly note that and answer using general knowledge. Keep follow-up answers concise (under 200 words unless the question demands more).`;
 
   const isFirstTurn = messages.length === 0;
-  // useChat sends UIMessage[]; convert to model messages.
-  // For the very first turn, synthesize a placeholder user message so the model has something to respond to.
   const uiMessages: UIMessage[] = isFirstTurn
     ? [{
         id: 'seed',
@@ -114,6 +115,13 @@ On follow-up turns, answer the user's specific question while staying anchored t
     : (messages as UIMessage[]);
 
   const modelMessages = await convertToModelMessages(uiMessages);
+
+  // Build the client per-request so we can honor the runtime key. Cheap.
+  const nvidia = createOpenAICompatible({
+    name: 'nvidia',
+    baseURL: 'https://integrate.api.nvidia.com/v1',
+    apiKey,
+  });
 
   const result = streamText({
     model: nvidia.chatModel('meta/llama-3.3-70b-instruct'),

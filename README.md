@@ -19,28 +19,25 @@ Drop a paper, contract, essay, or long-form article into your library. Highlight
 git clone https://github.com/<you>/readaura.git
 cd readaura
 npm install
-cp .env.example .env.local
-# Add your NVIDIA NIM API key to .env.local (free at https://build.nvidia.com/)
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000. On first run, click the **Settings** gear in the navbar and paste your NVIDIA NIM API key (free at [build.nvidia.com](https://build.nvidia.com/)). The key is stored in your browser's localStorage — never in a file on disk.
 
 ### Docker
 
 ```bash
-cp .env.example .env       # then fill in NVIDIA_API_KEY
 docker compose up --build
 ```
 
-Library data (SQLite + uploaded files) is stored in a named `readaura_data` volume.
+Library data (SQLite + uploaded files) is stored in a named `readaura_data` volume. Add your API key via the in-app Settings dialog.
 
 ## Configuration
 
-Environment variables (set in `.env.local`, or `.env` for Docker Compose):
+Environment variables (optional — set in `.env.local`, or `.env` for Docker Compose):
 
-- `NVIDIA_API_KEY` — required to enable AI explanations. Free tier at [build.nvidia.com](https://build.nvidia.com/). The app is fully usable without it (you just lose highlight-to-explain).
-- `READAURA_DB_PATH` — optional override for the SQLite database path. Defaults to `./readaura.db`.
+- `NVIDIA_API_KEY` — server-side fallback for the AI explain feature. The primary flow stores the key in your browser via Settings; set this env var only for shared/headless self-hosted setups where every visitor should share a key.
+- `READAURA_DB_PATH` — override for the SQLite database path. Defaults to `./readaura.db`.
 
 ## How it works
 

@@ -21,9 +21,9 @@ The app boots at http://localhost:3000. SQLite (`readaura.db`) and uploaded file
 
 ```
 app/                  Next.js App Router pages and API routes
-  api/                Server routes (uploads, AI explain, TTS, etc.)
-  reports/            The Library UI (yes, the folder is still named `reports`)
-components/           Shared React components
+  api/library/        Server routes (uploads, AI explain, TTS, etc.)
+  library/            The Library UI
+components/           Shared React components (Navbar, theme, shadcn-style ui/)
 lib/                  Server-only helpers — DB, text extraction, auth shim
 ROADMAP.md            What's planned and why
 ```
