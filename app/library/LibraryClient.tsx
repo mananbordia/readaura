@@ -6,8 +6,13 @@ import {
   ArrowDownUp, ArrowLeft, FileText, FileType2, Loader2, Minus, PencilLine, Plus,
   Save, Search, Sparkles, Tags, Trash2, Upload, X, Volume2, Pause, Play, Square, MessageSquare,
 } from 'lucide-react';
-import type { Document, SavedExplanation } from '@/lib/db';
-import { fetchDocuments, removeDocument, editDocument } from './actions';
+import type { Document, FileType, SavedExplanation } from '@/lib/types';
+import {
+  listDocuments, getDocument, createDocument, updateDocument, deleteDocument,
+  getFile, setFileText, getHtmlOverride, setHtmlOverride,
+} from '@/lib/storage';
+import { extractPdfText } from '@/lib/pdf-text';
+import { convertDocxBlobToHtml } from '@/lib/docx-html';
 import ExplainPopover from './ExplainPopover';
 import SavedExplanationsDrawer from './SavedExplanationsDrawer';
 import { cn } from '@/lib/utils';
@@ -84,11 +89,10 @@ function textToHtml(text: string): string {
 }
 
 type Props = {
-  initialDocuments: Document[];
   aiConfigured: boolean;
 };
 
-export default function LibraryClient({ initialDocuments, aiConfigured: serverHasEnvKey }: Props) {
+export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) {
   const { hasKey: clientHasKey, hydrated: apiKeyHydrated } = useApiKey();
   // Until we've read localStorage, optimistically assume AI is configured.
   // This avoids the "missing key" banner flashing for users who have saved a
@@ -96,7 +100,20 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
   // ~1 frame after mount — acceptable.
   const aiConfigured = serverHasEnvKey || (apiKeyHydrated ? clientHasKey : true);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [documents, setDocuments] = useState<Document[]>(initialDocuments);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [docsLoaded, setDocsLoaded] = useState(false);
+
+  // Hydrate the library from IndexedDB on mount.
+  useEffect(() => {
+    let cancelled = false;
+    listDocuments().then(docs => {
+      if (!cancelled) {
+        setDocuments(docs);
+        setDocsLoaded(true);
+      }
+    }).catch(() => { if (!cancelled) setDocsLoaded(true); });
+    return () => { cancelled = true; };
+  }, []);
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
   const [error, setError] = useState('');
   const [docxHtml, setDocxHtml] = useState('');
@@ -155,6 +172,8 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
   const [ttsProgress, setTtsProgress] = useState({ current: 0, total: 0 });
   const [ttsPauseReason, setTtsPauseReason] = useState<'table' | 'image' | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
+  const pdfObjectUrlRef = useRef<string | null>(null);
 
   // Viewer ref for selection + TTS highlighting
   const docxViewerRef = useRef<HTMLDivElement>(null);
@@ -328,32 +347,34 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
     }
     setUploading(true);
     setError('');
-    const tagsStr = uploadTags.join(', ');
     const errors: string[] = [];
 
     for (const file of uploadFiles) {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      if (ext !== 'pdf' && ext !== 'docx') {
+        errors.push(`${file.name}: not a PDF or DOCX`);
+        continue;
+      }
       const title = uploadFiles.length === 1 && uploadTitle.trim()
         ? uploadTitle.trim()
         : uploadTitle.trim()
           ? `${uploadTitle.trim()} - ${file.name.replace(/\.[^.]+$/, '')}`
           : file.name.replace(/\.[^.]+$/, '');
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('title', title);
-      formData.append('tags', tagsStr);
       try {
-        const res = await fetch('/api/library/upload', { method: 'POST', body: formData });
-        if (!res.ok) {
-          const data = await res.json();
-          errors.push(`${file.name}: ${data.error || 'failed'}`);
-        }
-      } catch {
-        errors.push(`${file.name}: upload failed`);
+        await createDocument({
+          blob: file,
+          title,
+          tags: uploadTags,
+          fileType: ext as FileType,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'unknown';
+        errors.push(`${file.name}: ${msg}`);
       }
     }
 
     if (errors.length > 0) setError(errors.join('; '));
-    setDocuments(await fetchDocuments());
+    setDocuments(await listDocuments());
     setUploading(false);
     if (errors.length === 0) {
       resetUploadForm();
@@ -362,26 +383,24 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
   };
 
   const handlePasteUpload = async () => {
-    if (!pasteText.trim()) { setError('Paste some text first.'); return; }
+    const text = pasteText.trim();
+    if (!text) { setError('Paste some text first.'); return; }
     if (!uploadTitle.trim()) { setError('Pasted text needs a title.'); return; }
     setUploading(true);
     setError('');
     try {
-      const res = await fetch('/api/library/upload-text', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: uploadTitle.trim(), text: pasteText, tags: uploadTags.join(', ') }),
+      const blob = new Blob([text], { type: 'text/plain' });
+      await createDocument({
+        blob,
+        title: uploadTitle.trim(),
+        tags: uploadTags,
+        fileType: 'txt',
       });
-      if (!res.ok) {
-        const data = await res.json();
-        setError(data.error || 'Upload failed');
-      } else {
-        setDocuments(await fetchDocuments());
-        resetUploadForm();
-        setShowUpload(false);
-      }
-    } catch {
-      setError('Upload failed.');
+      setDocuments(await listDocuments());
+      resetUploadForm();
+      setShowUpload(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed.');
     }
     setUploading(false);
   };
@@ -395,15 +414,13 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
   };
 
   const handleDelete = async (documentId: string) => {
-    const res = await removeDocument(documentId);
-    if (res.ok) {
-      setDocuments(prev => prev.filter(r => r.id !== documentId));
-      setBulkSelected(prev => { const n = new Set(prev); n.delete(documentId); return n; });
-      if (selectedDocument?.id === documentId) {
-        setSelectedDocument(null);
-        setDocxHtml('');
-        stopTts();
-      }
+    await deleteDocument(documentId);
+    setDocuments(prev => prev.filter(r => r.id !== documentId));
+    setBulkSelected(prev => { const n = new Set(prev); n.delete(documentId); return n; });
+    if (selectedDocument?.id === documentId) {
+      setSelectedDocument(null);
+      setDocxHtml('');
+      stopTts();
     }
   };
 
@@ -421,14 +438,12 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
 
   const saveEdit = async () => {
     if (!editingId || !editTitle.trim()) return;
-    const res = await editDocument(editingId, editTitle.trim(), editTags);
-    if (res.ok) {
-      setDocuments(prev => prev.map(r =>
-        r.id === editingId ? { ...r, title: editTitle.trim(), tags: editTags } : r
-      ));
-      if (selectedDocument?.id === editingId) {
-        setSelectedDocument(prev => prev ? { ...prev, title: editTitle.trim(), tags: editTags } : prev);
-      }
+    await updateDocument(editingId, { title: editTitle.trim(), tags: editTags });
+    setDocuments(prev => prev.map(r =>
+      r.id === editingId ? { ...r, title: editTitle.trim(), tags: editTags } : r
+    ));
+    if (selectedDocument?.id === editingId) {
+      setSelectedDocument(prev => prev ? { ...prev, title: editTitle.trim(), tags: editTags } : prev);
     }
     cancelEdit();
   };
@@ -444,9 +459,9 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
       const nextTags = action === 'add'
         ? Array.from(new Set([...doc.tags, t]))
         : doc.tags.filter(x => x !== t);
-      await editDocument(id, doc.title, nextTags);
+      await updateDocument(id, { title: doc.title, tags: nextTags });
     }));
-    setDocuments(await fetchDocuments());
+    setDocuments(await listDocuments());
     setBulkTagOpen(false);
   };
 
@@ -454,8 +469,8 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
     const ids = Array.from(bulkSelected);
     if (ids.length === 0) return;
     if (!confirm(`Delete ${ids.length} document${ids.length === 1 ? '' : 's'}? This can't be undone.`)) return;
-    await Promise.all(ids.map(id => removeDocument(id)));
-    setDocuments(await fetchDocuments());
+    await Promise.all(ids.map(id => deleteDocument(id)));
+    setDocuments(await listDocuments());
     setBulkSelected(new Set());
   };
 
@@ -517,23 +532,35 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
     setSelectedDocument(doc);
     setDocxHtml('');
     ttsItemsRef.current = [];
+    // Revoke any previously-created PDF object URL before we make a new one.
+    if (pdfObjectUrlRef.current) {
+      URL.revokeObjectURL(pdfObjectUrlRef.current);
+      pdfObjectUrlRef.current = null;
+      setPdfObjectUrl(null);
+    }
+
+    const blob = await getFile(doc.id);
+    if (!blob) {
+      setDocxHtml('<p>File data missing in browser storage.</p>');
+      return;
+    }
 
     if (doc.fileType === 'docx') {
       try {
-        const res = await fetch(`/api/library/${doc.id}/html`);
-        const data = await res.json();
-        const rawHtml = data.html || '';
+        // Prefer the user's edited HTML if any; otherwise convert the DOCX
+        // blob to HTML in the browser via mammoth.
+        const override = await getHtmlOverride(doc.id);
+        const rawHtml = override ?? await convertDocxBlobToHtml(blob);
         const { html, items } = processDocxHtml(rawHtml);
         setDocxHtml(html);
         ttsItemsRef.current = items;
-      } catch {
-        setDocxHtml('<p>Failed to load document.</p>');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to load document.';
+        setDocxHtml(`<p>${msg}</p>`);
       }
     } else if (doc.fileType === 'txt') {
       try {
-        const res = await fetch(`/api/library/${doc.id}/text`);
-        const data = await res.json();
-        const text = data.text || '';
+        const text = await blob.text();
         const { html, items } = processDocxHtml(textToHtml(text));
         setDocxHtml(html);
         ttsItemsRef.current = items;
@@ -541,14 +568,14 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
         setDocxHtml('<p>Failed to load text.</p>');
       }
     } else if (doc.fileType === 'pdf') {
-      // PDF.js renders its own pages with a real text layer (selection →
-      // Explain works automatically). We still fetch extracted text so TTS
-      // can read the document sequentially — click-to-jump and per-paragraph
-      // highlighting don't apply for PDFs.
+      // PDF.js renders pages with a real text layer (selection → Explain
+      // works automatically). We also extract text so TTS can read the
+      // document sequentially.
+      const url = URL.createObjectURL(blob);
+      pdfObjectUrlRef.current = url;
+      setPdfObjectUrl(url);
       try {
-        const res = await fetch(`/api/library/${doc.id}/text`);
-        const data = await res.json();
-        const text = (data.text || '').trim();
+        const text = (await extractPdfText(blob)).trim();
         if (text.length > 0) {
           const { items } = processDocxHtml(textToHtml(text));
           ttsItemsRef.current = items;
@@ -565,9 +592,8 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
     if (!selectedDocument) return;
     if (!txtEditing) {
       try {
-        const res = await fetch(`/api/library/${selectedDocument.id}/text`);
-        const data = await res.json();
-        setTxtEditContent(data.text || '');
+        const blob = await getFile(selectedDocument.id);
+        setTxtEditContent(blob ? await blob.text() : '');
         setTxtEditing(true);
         stopTts();
       } catch {
@@ -577,12 +603,8 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
     }
     setTxtSaving(true);
     try {
-      const res = await fetch(`/api/library/${selectedDocument.id}/update-text`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: txtEditContent }),
-      });
-      if (!res.ok) { setError('Failed to save.'); return; }
+      await setFileText(selectedDocument.id, txtEditContent);
+      setDocuments(await listDocuments());
       const { html, items } = processDocxHtml(textToHtml(txtEditContent));
       setDocxHtml(html);
       ttsItemsRef.current = items;
@@ -599,12 +621,7 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
     setDocxSaving(true);
     try {
       const editedHtml = docxViewerRef.current.innerHTML;
-      const res = await fetch(`/api/library/${selectedDocument.id}/html`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ html: editedHtml }),
-      });
-      if (!res.ok) { setError('Failed to save.'); return; }
+      await setHtmlOverride(selectedDocument.id, editedHtml);
       const { html, items } = processDocxHtml(editedHtml);
       setDocxHtml(html);
       ttsItemsRef.current = items;
@@ -839,6 +856,10 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
     return () => {
       if (audio) { audio.pause(); audio.src = ''; }
       cache.clear();
+      if (pdfObjectUrlRef.current) {
+        URL.revokeObjectURL(pdfObjectUrlRef.current);
+        pdfObjectUrlRef.current = null;
+      }
     };
   }, []);
 
@@ -884,7 +905,7 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
     });
   };
 
-  const libraryIsEmpty = documents.length === 0;
+  const libraryIsEmpty = docsLoaded && documents.length === 0;
 
   // ====== Render ======
   return (
@@ -1246,7 +1267,13 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
                 onClick={handlePdfClick}
                 className={cn(ttsActive && 'tts-active', 'cursor-text')}
               >
-                <PdfViewer url={`/api/library/${selectedDocument.id}/file`} />
+                {pdfObjectUrl ? (
+                  <PdfViewer url={pdfObjectUrl} />
+                ) : (
+                  <div className="flex items-center justify-center rounded-lg border border-border bg-card p-12 text-sm text-muted-foreground">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading PDF…
+                  </div>
+                )}
               </div>
             ) : (
               txtEditing ? (

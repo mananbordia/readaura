@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { MessageSquare, Sparkles, Trash2 } from 'lucide-react';
-import type { SavedExplanation } from '@/lib/db';
+import type { SavedExplanation } from '@/lib/types';
+import { listExplanations, deleteExplanation } from '@/lib/storage';
 import { timeAgo } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -27,10 +28,7 @@ export default function SavedExplanationsDrawer({ documentId, refreshKey, open, 
   const loadExplanations = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/library/${documentId}/explanations`);
-      if (!res.ok) return;
-      const data = await res.json() as { explanations: SavedExplanation[] };
-      setExplanations(data.explanations);
+      setExplanations(await listExplanations(documentId));
     } finally {
       setLoading(false);
     }
@@ -51,10 +49,8 @@ export default function SavedExplanationsDrawer({ documentId, refreshKey, open, 
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this saved explanation?')) return;
-    const res = await fetch(`/api/library/${documentId}/explanations/${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      setExplanations(prev => prev.filter(e => e.id !== id));
-    }
+    await deleteExplanation(id);
+    setExplanations(prev => prev.filter(e => e.id !== id));
   };
 
   return (
