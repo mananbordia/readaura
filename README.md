@@ -1,20 +1,22 @@
 # ReadAura
 
-Local-first PDF / DOCX / TXT reader with AI-powered explanations on text selection and text-to-speech read-aloud.
+A local-first PDF / DOCX / TXT reader with AI explanations on selection and neural-voice text-to-speech.
+
+**Live demo:** [readaura-ai.vercel.app](https://readaura-ai.vercel.app)
 
 Drop a paper, contract, essay, or long-form article into your library. Highlight any passage to get a 2–4 sentence explanation from an LLM — with multi-turn follow-up questions. Hit "Read Aloud" to have it spoken back, paragraph by paragraph, with click-to-jump and auto-pause at tables and images.
 
-**Everything lives in your browser.** Documents, tags, edits, and saved explanations are stored in IndexedDB — never uploaded to a server, never written to disk. The deployed app is stateless: the only thing the server does is proxy your AI calls and stream TTS audio.
+**Everything lives in your browser.** Documents, tags, edits, and saved explanations are stored in IndexedDB. Nothing is uploaded to a server, nothing is written to disk. The hosted instance is stateless: the only thing the server does is proxy your AI calls and stream TTS audio.
 
 ## Features
 
-- **Library** — Upload PDF or DOCX (drag-and-drop or file picker), or paste raw text. Tag, search, sort, bulk-edit, and delete from a single page.
-- **Viewer** — PDFs rendered with PDF.js (selectable text layer, original layout preserved). DOCX rendered as rich HTML via mammoth-in-the-browser. TXT served as reader prose.
+- **Library** — Upload PDF / DOCX (drag-and-drop or file picker), or paste raw text. Tag, search, sort, bulk-edit, delete.
+- **Viewer** — PDFs render via PDF.js with a selectable text layer (original layout preserved). DOCX renders as rich HTML via mammoth-in-the-browser. TXT served as reader prose.
 - **Inline editing** — Edit DOCX content directly in the browser, or rewrite pasted-text documents.
-- **AI Explain** — Highlight any passage → floating "Explain" button → multi-turn chat with an LLM about the selection.
-- **Saved explanations** — Threads persist per document in a sidebar drawer; resume any conversation.
-- **Text-to-speech** — High-quality neural voices via Microsoft Edge TTS (no API key). Variable speed, paragraph highlighting, click-to-jump.
+- **AI Explain** — Highlight any passage → floating "Explain" button → multi-turn chat about the selection. Threads save to a per-document drawer; resume anytime.
+- **Text-to-speech** — High-quality Microsoft Edge neural voices. Variable speed, paragraph highlighting, click-to-jump, auto-pause at tables and images. No API key needed.
 - **Three themes** — Light, dark, and a retro CRT mode.
+- **Bring your own AI key** — Paste a free NVIDIA NIM key into the in-app Settings dialog; it's stored in your browser's localStorage, never on the server.
 
 ## Quick start
 
@@ -25,7 +27,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. On first run, click the **Settings** gear in the navbar and paste your NVIDIA NIM API key (free at [build.nvidia.com](https://build.nvidia.com/)). The key is stored in your browser's localStorage.
+Open [http://localhost:3000](http://localhost:3000). On first run, click the **Settings** gear in the navbar and paste your NVIDIA NIM key (free at [build.nvidia.com](https://build.nvidia.com/)).
 
 ## Deploy
 
@@ -33,7 +35,7 @@ Open http://localhost:3000. On first run, click the **Settings** gear in the nav
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/<you>/readaura)
 
-No environment variables needed for the default flow — every visitor supplies their own NVIDIA key via the in-app Settings dialog. If you want a shared key for every visitor (kiosk-style deployments), set `NVIDIA_API_KEY` in your Vercel project settings.
+Zero env vars needed for the default flow — every visitor supplies their own NVIDIA key in Settings. Set `NVIDIA_API_KEY` in your Vercel project only if you want a shared kiosk-style key.
 
 ### Docker
 
@@ -41,29 +43,31 @@ No environment variables needed for the default flow — every visitor supplies 
 docker compose up --build
 ```
 
-The container is stateless — no volume mounts required. Each user's library lives in their own browser.
+The container is stateless — no volume mounts required.
 
 ## Configuration
 
-Environment variables (all optional):
+All env vars are optional:
 
-- `NVIDIA_API_KEY` — server-side fallback. The default flow stores the key in your browser via Settings; set this only for shared/headless deployments where every visitor should share a key.
+| Variable | Effect |
+| --- | --- |
+| `NVIDIA_API_KEY` | Server-side fallback for the AI Explain feature. Default flow stores the key in the visitor's browser; only set this for shared / headless deployments. |
 
 ## How it works
 
-- **Storage** — IndexedDB stores documents (metadata + file blob), HTML overrides for edited DOCX, and saved explanation threads. No SQLite, no filesystem.
+- **Storage** — IndexedDB (via [`idb`](https://github.com/jakearchibald/idb)) stores document metadata, file blobs, edited DOCX HTML, and saved explanation threads. No SQLite, no filesystem.
 - **PDF rendering** — `react-pdf` with PDF.js, dynamically imported so it stays out of the server bundle. Selection in the text layer triggers the in-app Explain flow.
 - **DOCX rendering** — `mammoth` runs in the browser to convert DOCX → HTML with embedded base64 images.
-- **TTS** — `msedge-tts` streams MP3 from Microsoft Edge's voice service. The only thing this needs the server for is the WebSocket connection to Microsoft.
-- **LLM** — NVIDIA NIM (`meta/llama-3.3-70b-instruct`) via an OpenAI-compatible endpoint. The server route is a thin streaming proxy that injects your API key and rate-limits per IP.
+- **TTS** — `msedge-tts` streams MP3 from Microsoft Edge's voice service. The server route is a thin pass-through.
+- **LLM** — NVIDIA NIM (`meta/llama-3.3-70b-instruct`) via an OpenAI-compatible endpoint. The server route is a streaming proxy that injects the user-supplied API key and rate-limits per IP.
 
 ## Tech stack
 
-Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 · IndexedDB (via `idb`) · Vercel AI SDK · shadcn-style component layer (Radix + cva).
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 · IndexedDB · Vercel AI SDK · shadcn-style component layer (Radix + cva).
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md).
+See [ROADMAP.md](ROADMAP.md) — what's planned, what's done, what's explicitly out of scope.
 
 ## Contributing
 
