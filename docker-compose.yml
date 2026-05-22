@@ -1,0 +1,18 @@
+services:
+  readaura:
+    build: .
+    image: readaura:latest
+    container_name: readaura
+    ports:
+      - "3000:3000"
+    environment:
+      # Get a free key at https://build.nvidia.com/. Optional — the rest of
+      # the app (upload, viewer, TTS) works without it.
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      READAURA_DB_PATH: /data/readaura.db
+    volumes:
+      - readaura_data:/data
+    restart: unless-stopped
+
+volumes:
+  readaura_data:

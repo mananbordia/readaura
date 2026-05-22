@@ -7,8 +7,8 @@ import { DefaultChatTransport, type UIMessage } from 'ai';
 const MAX_TURNS = 20;
 
 type Props = {
-  reportId: string;
-  reportTitle: string;
+  documentId: string;
+  documentTitle: string;
   selectedText: string;
   contextBefore: string;
   contextAfter: string;
@@ -25,8 +25,8 @@ function getMessageText(m: UIMessage): string {
 }
 
 export default function ExplainPopover({
-  reportId,
-  reportTitle,
+  documentId,
+  documentTitle,
   selectedText,
   contextBefore,
   contextAfter,
@@ -47,7 +47,7 @@ export default function ExplainPopover({
   const { messages, sendMessage, status, stop, setMessages, error, regenerate } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/ai/explain',
-      body: { reportId, reportTitle, selectedText, contextBefore, contextAfter },
+      body: { reportId: documentId, reportTitle: documentTitle, selectedText, contextBefore, contextAfter },
     }),
     messages: initialMessages,
   });
@@ -120,7 +120,7 @@ export default function ExplainPopover({
     try {
       if (!savedId) {
         // First save: POST the whole thread
-        const res = await fetch(`/api/reports/${reportId}/explanations`, {
+        const res = await fetch(`/api/reports/${documentId}/explanations`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -142,7 +142,7 @@ export default function ExplainPopover({
           setTimeout(() => setSaveStatus('idle'), 1500);
           return;
         }
-        const res = await fetch(`/api/reports/${reportId}/explanations/${savedId}`, {
+        const res = await fetch(`/api/reports/${documentId}/explanations/${savedId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ messages: newMessages }),
@@ -267,7 +267,7 @@ export default function ExplainPopover({
                   marginBottom: '0.2rem',
                   fontWeight: 'bold',
                 }}>
-                  {m.role === 'assistant' ? 'ANALYST' : 'YOU'}
+                  {m.role === 'assistant' ? 'AURA' : 'YOU'}
                 </div>
                 <div style={{ whiteSpace: 'pre-wrap' }}>
                   {text}

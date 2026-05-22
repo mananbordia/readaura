@@ -5,11 +5,10 @@ import { LOCAL_USER_ID, LOCAL_USERNAME } from './auth';
 
 // ---- Types ----
 
-export type ResearchReport = {
+export type Document = {
   id: string;
   userId: string;
   username: string;
-  region: string;
   title: string;
   tags: string[];
   fileType: string;
@@ -31,7 +30,7 @@ export type ExplanationMessage = {
 export type SavedExplanation = {
   id: string;
   userId: string;
-  reportId: string;
+  documentId: string;
   selectedText: string;
   contextBefore: string;
   contextAfter: string;
@@ -58,6 +57,7 @@ function db(): Database.Database {
   _db.pragma('journal_mode = WAL');
   _db.pragma('foreign_keys = ON');
   initSchema(_db);
+  migrateLegacy(_db);
   seedLocalUser(_db);
   return _db;
 }
@@ -79,10 +79,9 @@ function initSchema(d: Database.Database) {
       created_at TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS research_reports (
+    CREATE TABLE IF NOT EXISTS documents (
       id          TEXT PRIMARY KEY,
       user_id     TEXT NOT NULL REFERENCES users(id),
-      region      TEXT NOT NULL,
       title       TEXT NOT NULL,
       tags        TEXT NOT NULL DEFAULT '[]',
       file_type   TEXT NOT NULL,
@@ -95,7 +94,7 @@ function initSchema(d: Database.Database) {
     CREATE TABLE IF NOT EXISTS saved_explanations (
       id              TEXT PRIMARY KEY,
       user_id         TEXT NOT NULL REFERENCES users(id),
-      report_id       TEXT NOT NULL REFERENCES research_reports(id) ON DELETE CASCADE,
+      document_id     TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
       selected_text   TEXT NOT NULL,
       context_before  TEXT NOT NULL DEFAULT '',
       context_after   TEXT NOT NULL DEFAULT '',
@@ -112,11 +111,75 @@ function initSchema(d: Database.Database) {
       sequence        INTEGER NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS idx_reports_region ON research_reports(region);
-    CREATE INDEX IF NOT EXISTS idx_explanations_report ON saved_explanations(report_id);
+    CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
+    CREATE INDEX IF NOT EXISTS idx_explanations_document ON saved_explanations(document_id);
     CREATE INDEX IF NOT EXISTS idx_explanations_user ON saved_explanations(user_id);
     CREATE INDEX IF NOT EXISTS idx_explanation_messages_thread ON explanation_messages(explanation_id, sequence);
   `);
+}
+
+// Migrate from the pre-OSS schema (research_reports + region) to the new
+// documents schema. Idempotent — no-op if the legacy table is absent.
+// Region values are preserved as lowercase tags so users don't lose grouping.
+function migrateLegacy(d: Database.Database) {
+  const legacy = d
+    .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='research_reports'`)
+    .get();
+  if (!legacy) return;
+
+  d.transaction(() => {
+    type LegacyRow = {
+      id: string; user_id: string; region: string | null; title: string;
+      tags: string; file_type: string; file_path: string; file_size: number;
+      text_cache: string | null; created_at: string;
+    };
+    const rows = d.prepare(`SELECT * FROM research_reports`).all() as LegacyRow[];
+    const insertDoc = d.prepare(`INSERT OR IGNORE INTO documents
+      (id, user_id, title, tags, file_type, file_path, file_size, text_cache, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+
+    for (const r of rows) {
+      let tags: string[] = [];
+      try { tags = JSON.parse(r.tags); } catch { tags = []; }
+      if (r.region && r.region.trim()) {
+        const regionTag = r.region.trim().toLowerCase();
+        if (!tags.includes(regionTag)) tags.push(regionTag);
+      }
+      insertDoc.run(
+        r.id, r.user_id, r.title, JSON.stringify(tags),
+        r.file_type, r.file_path, r.file_size, r.text_cache, r.created_at,
+      );
+    }
+
+    // Rebuild saved_explanations if it still uses the old report_id column.
+    const hasReportIdCol = d
+      .prepare(`SELECT 1 AS x FROM pragma_table_info('saved_explanations') WHERE name='report_id'`)
+      .get();
+    if (hasReportIdCol) {
+      d.exec(`
+        CREATE TABLE saved_explanations_new (
+          id              TEXT PRIMARY KEY,
+          user_id         TEXT NOT NULL REFERENCES users(id),
+          document_id     TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+          selected_text   TEXT NOT NULL,
+          context_before  TEXT NOT NULL DEFAULT '',
+          context_after   TEXT NOT NULL DEFAULT '',
+          created_at      TEXT NOT NULL,
+          updated_at      TEXT NOT NULL
+        );
+        INSERT INTO saved_explanations_new
+          (id, user_id, document_id, selected_text, context_before, context_after, created_at, updated_at)
+        SELECT id, user_id, report_id, selected_text, context_before, context_after, created_at, updated_at
+        FROM saved_explanations;
+        DROP TABLE saved_explanations;
+        ALTER TABLE saved_explanations_new RENAME TO saved_explanations;
+        CREATE INDEX IF NOT EXISTS idx_explanations_document ON saved_explanations(document_id);
+        CREATE INDEX IF NOT EXISTS idx_explanations_user ON saved_explanations(user_id);
+      `);
+    }
+
+    d.exec(`DROP TABLE research_reports`);
+  })();
 }
 
 function seedLocalUser(d: Database.Database) {
@@ -124,13 +187,12 @@ function seedLocalUser(d: Database.Database) {
     .run(LOCAL_USER_ID, LOCAL_USERNAME, new Date().toISOString());
 }
 
-// ---- Research report queries ----
+// ---- Document queries ----
 
-type ReportRow = {
+type DocumentRow = {
   id: string;
   user_id: string;
   username: string;
-  region: string;
   title: string;
   tags: string;
   file_type: string;
@@ -140,12 +202,11 @@ type ReportRow = {
   created_at: string;
 };
 
-function toReport(r: ReportRow): ResearchReport {
+function toDocument(r: DocumentRow): Document {
   return {
     id: r.id,
     userId: r.user_id,
     username: r.username,
-    region: r.region,
     title: r.title,
     tags: JSON.parse(r.tags) as string[],
     fileType: r.file_type,
@@ -156,53 +217,52 @@ function toReport(r: ReportRow): ResearchReport {
   };
 }
 
-export function createReport(report: {
+export function createDocument(doc: {
   id: string;
   userId: string;
-  region: string;
   title: string;
   tags: string[];
   fileType: string;
   filePath: string;
   fileSize: number;
 }): void {
-  stmt(`INSERT INTO research_reports (id, user_id, region, title, tags, file_type, file_path, file_size, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(report.id, report.userId, report.region, report.title,
-      JSON.stringify(report.tags), report.fileType, report.filePath, report.fileSize,
+  stmt(`INSERT INTO documents (id, user_id, title, tags, file_type, file_path, file_size, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(doc.id, doc.userId, doc.title,
+      JSON.stringify(doc.tags), doc.fileType, doc.filePath, doc.fileSize,
       new Date().toISOString());
 }
 
-export function getReportsByRegion(region: string): ResearchReport[] {
-  const rows = stmt(`SELECT r.*, u.username FROM research_reports r
-    JOIN users u ON u.id = r.user_id
-    WHERE r.region = ? ORDER BY r.created_at DESC`)
-    .all(region) as ReportRow[];
-  return rows.map(toReport);
+export function listDocuments(userId: string): Document[] {
+  const rows = stmt(`SELECT d.*, u.username FROM documents d
+    JOIN users u ON u.id = d.user_id
+    WHERE d.user_id = ? ORDER BY d.created_at DESC`)
+    .all(userId) as DocumentRow[];
+  return rows.map(toDocument);
 }
 
-export function getReportById(id: string): ResearchReport | null {
-  const row = stmt(`SELECT r.*, u.username FROM research_reports r
-    JOIN users u ON u.id = r.user_id
-    WHERE r.id = ?`)
-    .get(id) as ReportRow | undefined;
-  return row ? toReport(row) : null;
+export function getDocumentById(id: string): Document | null {
+  const row = stmt(`SELECT d.*, u.username FROM documents d
+    JOIN users u ON u.id = d.user_id
+    WHERE d.id = ?`)
+    .get(id) as DocumentRow | undefined;
+  return row ? toDocument(row) : null;
 }
 
-export function deleteReport(id: string, userId: string): boolean {
-  const result = stmt('DELETE FROM research_reports WHERE id = ? AND user_id = ?')
+export function deleteDocument(id: string, userId: string): boolean {
+  const result = stmt('DELETE FROM documents WHERE id = ? AND user_id = ?')
     .run(id, userId);
   return result.changes > 0;
 }
 
-export function updateReport(id: string, userId: string, title: string, tags: string[]): boolean {
-  const result = stmt('UPDATE research_reports SET title = ?, tags = ? WHERE id = ? AND user_id = ?')
+export function updateDocument(id: string, userId: string, title: string, tags: string[]): boolean {
+  const result = stmt('UPDATE documents SET title = ?, tags = ? WHERE id = ? AND user_id = ?')
     .run(title, JSON.stringify(tags), id, userId);
   return result.changes > 0;
 }
 
-export function updateReportTextCache(id: string, text: string): void {
-  stmt('UPDATE research_reports SET text_cache = ? WHERE id = ?')
+export function updateDocumentTextCache(id: string, text: string): void {
+  stmt('UPDATE documents SET text_cache = ? WHERE id = ?')
     .run(text, id);
 }
 
@@ -211,7 +271,7 @@ export function updateReportTextCache(id: string, text: string): void {
 type ExplanationRow = {
   id: string;
   user_id: string;
-  report_id: string;
+  document_id: string;
   selected_text: string;
   context_before: string;
   context_after: string;
@@ -243,7 +303,7 @@ function toExplanation(row: ExplanationRow, messages: ExplanationMessage[]): Sav
   return {
     id: row.id,
     userId: row.user_id,
-    reportId: row.report_id,
+    documentId: row.document_id,
     selectedText: row.selected_text,
     contextBefore: row.context_before,
     contextAfter: row.context_after,
@@ -256,7 +316,7 @@ function toExplanation(row: ExplanationRow, messages: ExplanationMessage[]): Sav
 export function createExplanation(args: {
   id: string;
   userId: string;
-  reportId: string;
+  documentId: string;
   selectedText: string;
   contextBefore: string;
   contextAfter: string;
@@ -264,7 +324,7 @@ export function createExplanation(args: {
   createdAt: string;
 }): void {
   const insertParent = stmt(`INSERT INTO saved_explanations
-    (id, user_id, report_id, selected_text, context_before, context_after, created_at, updated_at)
+    (id, user_id, document_id, selected_text, context_before, context_after, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
   const insertMsg = stmt(`INSERT INTO explanation_messages
     (id, explanation_id, role, content, created_at, sequence)
@@ -272,7 +332,7 @@ export function createExplanation(args: {
 
   db().transaction(() => {
     insertParent.run(
-      args.id, args.userId, args.reportId,
+      args.id, args.userId, args.documentId,
       args.selectedText, args.contextBefore, args.contextAfter,
       args.createdAt, args.createdAt,
     );
@@ -322,9 +382,9 @@ export function getExplanationById(explanationId: string, userId: string): Saved
   return toExplanation(row, messageRows.map(toExplanationMessage));
 }
 
-export function getExplanationsByReport(reportId: string, userId: string): SavedExplanation[] {
-  const rows = stmt('SELECT * FROM saved_explanations WHERE report_id = ? AND user_id = ? ORDER BY updated_at DESC')
-    .all(reportId, userId) as ExplanationRow[];
+export function getExplanationsByDocument(documentId: string, userId: string): SavedExplanation[] {
+  const rows = stmt('SELECT * FROM saved_explanations WHERE document_id = ? AND user_id = ? ORDER BY updated_at DESC')
+    .all(documentId, userId) as ExplanationRow[];
   if (rows.length === 0) return [];
 
   const placeholders = rows.map(() => '?').join(',');

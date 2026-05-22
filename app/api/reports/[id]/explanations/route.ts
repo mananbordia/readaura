@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUserId } from '@/lib/auth';
-import { getReportById, createExplanation, getExplanationsByReport } from '@/lib/db';
+import { getDocumentById, createExplanation, getExplanationsByDocument } from '@/lib/db';
 import crypto from 'crypto';
 
 const MAX_SELECTED_TEXT = 2000;
@@ -24,12 +24,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const report = getReportById(id);
-  if (!report || report.userId !== userId) {
+  const doc = getDocumentById(id);
+  if (!doc || doc.userId !== userId) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  const explanations = getExplanationsByReport(id, userId);
+  const explanations = getExplanationsByDocument(id, userId);
   return NextResponse.json({ explanations });
 }
 
@@ -37,9 +37,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { id: reportId } = await params;
-  const report = getReportById(reportId);
-  if (!report || report.userId !== userId) {
+  const { id: documentId } = await params;
+  const doc = getDocumentById(documentId);
+  if (!doc || doc.userId !== userId) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   createExplanation({
     id,
     userId,
-    reportId,
+    documentId,
     selectedText,
     contextBefore: ctxBefore,
     contextAfter: ctxAfter,
