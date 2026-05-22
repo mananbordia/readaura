@@ -6,7 +6,7 @@ import { DefaultChatTransport, type UIMessage } from 'ai';
 import { Loader2, Save, Send, Sparkles, Square, AlertCircle, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { readApiKey } from '@/lib/use-api-key';
 
@@ -170,11 +170,11 @@ export default function ExplainPopover({
     <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
       <DialogContent data-explain-popover className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-xl">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border p-3 pr-12">
-          <div className="flex items-center gap-2 text-sm font-medium">
+        <div className="border-b border-border p-3 pr-12">
+          <DialogTitle className="flex items-center gap-2 text-sm font-medium">
             <Sparkles className="h-4 w-4 text-primary" />
-            <span>Explanation</span>
-          </div>
+            Explanation
+          </DialogTitle>
         </div>
 
         {/* Selection blockquote */}

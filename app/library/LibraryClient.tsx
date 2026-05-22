@@ -29,8 +29,22 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { TagInput } from '@/components/tag-input';
+import dynamic from 'next/dynamic';
 import { SettingsDialog } from '@/components/settings-dialog';
 import { useApiKey } from '@/lib/use-api-key';
+
+// PDF.js touches DOMMatrix at module load — defer to client-only.
+const PdfViewer = dynamic(
+  () => import('@/components/pdf-viewer').then(m => m.PdfViewer),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-40 items-center justify-center rounded-lg border border-border bg-card text-sm text-muted-foreground">
+        Loading PDF renderer…
+      </div>
+    ),
+  },
+);
 
 const TTS_VOICES = [
   { id: 'en-US-AvaMultilingualNeural', label: 'Ava (F)' },
@@ -210,7 +224,7 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
       viewer.removeEventListener('pointerup', handlePointerUp);
       document.removeEventListener('pointerdown', handleDocumentPointerDown);
     };
-  }, [docxEditing, docxHtml]);
+  }, [docxEditing, docxHtml, selectedDocument?.id]);
 
   const handleOpenExplain = () => {
     if (!selectionInfo) return;
@@ -526,6 +540,24 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
       } catch {
         setDocxHtml('<p>Failed to load text.</p>');
       }
+    } else if (doc.fileType === 'pdf') {
+      // PDF.js renders its own pages with a real text layer (selection →
+      // Explain works automatically). We still fetch extracted text so TTS
+      // can read the document sequentially — click-to-jump and per-paragraph
+      // highlighting don't apply for PDFs.
+      try {
+        const res = await fetch(`/api/library/${doc.id}/text`);
+        const data = await res.json();
+        const text = (data.text || '').trim();
+        if (text.length > 0) {
+          const { items } = processDocxHtml(textToHtml(text));
+          ttsItemsRef.current = items;
+        } else {
+          ttsItemsRef.current = [];
+        }
+      } catch {
+        ttsItemsRef.current = [];
+      }
     }
   };
 
@@ -709,24 +741,11 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
       return;
     }
     try {
-      if (selectedDocument.fileType === 'docx' || selectedDocument.fileType === 'txt') {
-        if (ttsItemsRef.current.length === 0) {
-          setError('No content found to read.');
-          return;
-        }
-      } else {
-        const res = await fetch(`/api/library/${selectedDocument.id}/text`);
-        const data = await res.json();
-        const text = data.text || '';
-        if (!text.trim()) {
-          setError('No text could be extracted from this document.');
-          return;
-        }
-        const paras = text.split(/\n\s*\n/).filter((p: string) => p.trim().length > 0);
-        ttsItemsRef.current = paras.map((p: string) => ({ type: 'text' as const, text: p.trim(), element: null }));
+      // All file types now eagerly populate ttsItemsRef in handleView.
+      if (ttsItemsRef.current.length === 0) {
+        setError('No content found to read.');
+        return;
       }
-
-      if (ttsItemsRef.current.length === 0) { setError('No content found to read.'); return; }
       ttsIndexRef.current = 0;
       ttsCancelledRef.current = false;
       ttsGenRef.current++;
@@ -756,6 +775,40 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
     if (!tagged) return;
     const itemIndex = parseInt(tagged.getAttribute('data-tts-index') || '', 10);
     if (isNaN(itemIndex) || itemIndex < 0 || itemIndex >= ttsItemsRef.current.length) return;
+    jumpTtsToIndex(itemIndex);
+  };
+
+  // Click-to-start / click-to-jump for PDFs. The PDF.js text layer doesn't
+  // carry data-tts-index attributes, so we look up the clicked text against
+  // the cached extracted TTS items by substring match (whitespace-normalised).
+  const handlePdfClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (ttsItemsRef.current.length === 0) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed && selection.toString().trim().length > 0) return;
+
+    const target = e.target as HTMLElement;
+    const span = target.closest('span');
+    if (!span) return; // ignore clicks outside text layer (page margins, canvas)
+    const clickedText = (span.textContent || '').trim();
+    if (!clickedText) return;
+
+    const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+    const sig = norm(clickedText).slice(0, 40);
+    if (sig.length < 5) return;
+
+    let itemIndex = -1;
+    for (let i = 0; i < ttsItemsRef.current.length; i++) {
+      const item = ttsItemsRef.current[i];
+      if (item.type === 'text' && norm(item.text).includes(sig)) {
+        itemIndex = i;
+        break;
+      }
+    }
+    if (itemIndex < 0) return;
+    jumpTtsToIndex(itemIndex);
+  };
+
+  const jumpTtsToIndex = (itemIndex: number) => {
     ttsGenRef.current++;
     if (audioRef.current) {
       audioRef.current.onended = null;
@@ -764,8 +817,11 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
       audioRef.current.removeAttribute('src');
       audioRef.current.load();
     }
+    ttsCancelledRef.current = false;
     setTtsPaused(false);
     setTtsPauseReason(null);
+    if (!ttsActive) setTtsActive(true);
+
     const voice = ttsVoice;
     let prefetched = 0;
     for (let i = itemIndex + 1; i < ttsItemsRef.current.length && prefetched < 3; i++) {
@@ -1106,15 +1162,9 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
                 <h2 className="min-w-0 flex-1 truncate text-base font-semibold sm:text-lg">{selectedDocument.title}</h2>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                {(selectedDocument.fileType === 'docx' || selectedDocument.fileType === 'txt') && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setDrawerOpen(true)}
-                  >
-                    <MessageSquare className="h-4 w-4" /> <span className="hidden sm:inline">Explanations</span>
-                  </Button>
-                )}
+                <Button variant="outline" size="sm" onClick={() => setDrawerOpen(true)}>
+                  <MessageSquare className="h-4 w-4" /> <span className="hidden sm:inline">Explanations</span>
+                </Button>
                 {selectedDocument.fileType === 'txt' && (
                   <Button size="sm" variant="outline" onClick={handleTxtEdit} disabled={txtSaving}>
                     {txtSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PencilLine className="h-3.5 w-3.5" />}
@@ -1187,16 +1237,18 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
               </div>
             )}
 
-            {/* Document body */}
-            {selectedDocument.fileType === 'pdf' && (
-              <iframe
-                src={`/api/library/${selectedDocument.id}/file`}
-                className="h-[80vh] w-full rounded-lg border border-border bg-white"
-                title={selectedDocument.title}
-              />
-            )}
-
-            {(selectedDocument.fileType === 'docx' || selectedDocument.fileType === 'txt') && (
+            {/* Document body. PDFs render via PDF.js (visual fidelity +
+                selectable text layer). DOCX/TXT render through the
+                reader-prose container. */}
+            {selectedDocument.fileType === 'pdf' ? (
+              <div
+                ref={docxViewerRef}
+                onClick={handlePdfClick}
+                className={cn(ttsActive && 'tts-active', 'cursor-text')}
+              >
+                <PdfViewer url={`/api/library/${selectedDocument.id}/file`} />
+              </div>
+            ) : (
               txtEditing ? (
                 <Textarea
                   value={txtEditContent}
@@ -1360,7 +1412,7 @@ export default function LibraryClient({ initialDocuments, aiConfigured: serverHa
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
 
       {/* Explanations sheet (only when a doc is open) */}
-      {selectedDocument && (selectedDocument.fileType === 'docx' || selectedDocument.fileType === 'txt') && (
+      {selectedDocument && (
         <SavedExplanationsDrawer
           documentId={selectedDocument.id}
           refreshKey={explanationsRefreshKey}
