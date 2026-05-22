@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter, Newsreader, VT323 } from 'next/font/google';
 import { ThemeProvider } from '@/components/theme-provider';
 import './globals.css';
@@ -22,9 +22,56 @@ const vt323 = VT323({
   display: 'swap',
 });
 
+const SITE_URL = 'https://readaura-ai.vercel.app';
+const DESCRIPTION =
+  'Local-first PDF / DOCX / TXT reader. Highlight any passage for AI explanations, read aloud with neural TTS. Everything stays in your browser.';
+
 export const metadata: Metadata = {
-  title: 'ReadAura',
-  description: 'Local-first PDF/DOCX reader with AI explain-on-selection and TTS read-aloud.',
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: 'ReadAura — a reader that explains itself',
+    template: '%s · ReadAura',
+  },
+  description: DESCRIPTION,
+  applicationName: 'ReadAura',
+  keywords: [
+    'PDF reader',
+    'DOCX reader',
+    'AI explanations',
+    'text to speech',
+    'TTS',
+    'local first',
+    'reading app',
+    'highlight explain',
+    'study tool',
+  ],
+  authors: [{ name: 'Manan Bordia' }],
+  creator: 'Manan Bordia',
+  category: 'productivity',
+  openGraph: {
+    type: 'website',
+    siteName: 'ReadAura',
+    title: 'ReadAura — a reader that explains itself',
+    description: DESCRIPTION,
+    url: SITE_URL,
+    locale: 'en_US',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'ReadAura — a reader that explains itself',
+    description: DESCRIPTION,
+  },
+  robots: { index: true, follow: true },
+  // `themeColor` is set via viewport export below (Next 14+ convention).
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#fbfaf6' },
+    { media: '(prefers-color-scheme: dark)', color: '#1c1b1e' },
+  ],
+  width: 'device-width',
+  initialScale: 1,
 };
 
 // Inline script avoids a flash of the wrong theme on first paint. Static string.

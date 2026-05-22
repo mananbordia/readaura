@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { BookOpen, Settings } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { SettingsDialog } from '@/components/settings-dialog';
+import { Logo } from '@/components/logo';
 import { Button } from '@/components/ui/button';
 
 export default function Navbar() {
@@ -19,7 +20,7 @@ export default function Navbar() {
               href="/"
               className="inline-flex items-center gap-2 text-sm font-semibold tracking-tight hover:opacity-80"
             >
-              <BookOpen className="h-4 w-4 text-primary" />
+              <Logo size={18} className="text-primary" />
               <span>ReadAura</span>
             </Link>
             <span className="text-muted-foreground">/</span>
