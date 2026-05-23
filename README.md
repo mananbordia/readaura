@@ -4,7 +4,7 @@ A local-first PDF / DOCX / TXT reader with AI explanations on selection and neur
 
 **Live demo:** [readaura-ai.vercel.app](https://readaura-ai.vercel.app)
 
-<video src="https://readaura-ai.vercel.app/demo/product_demo.webm" width="100%" controls autoplay loop muted playsinline></video>
+https://github.com/user-attachments/assets/d08ea32b-df68-4698-83d6-ad8ca2286603
 
 Drop a paper, contract, essay, or long-form article into your library. Highlight any passage to get a 2–4 sentence explanation from an LLM — with multi-turn follow-up questions. Hit "Read Aloud" to have it spoken back, paragraph by paragraph, with click-to-jump and auto-pause at tables and images.
 
