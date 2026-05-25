@@ -8,6 +8,24 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { Document, ExplanationMessage, FileType, SavedExplanation } from './types';
 
+function getRandomUUID(): string {
+  if (typeof window !== 'undefined' && window.crypto) {
+    if (typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    if (typeof window.crypto.getRandomValues === 'function') {
+      return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, (c: any) =>
+        (c ^ (window.crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16)
+      );
+    }
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 interface ReadAuraDB extends DBSchema {
   documents: { key: string; value: Document };
   files: { key: string; value: { id: string; blob: Blob } };
@@ -69,7 +87,7 @@ export async function createDocument(args: {
 }): Promise<Document> {
   const d = await db();
   const doc: Document = {
-    id: crypto.randomUUID(),
+    id: getRandomUUID(),
     title: args.title,
     tags: args.tags,
     fileType: args.fileType,
@@ -156,7 +174,7 @@ export async function createExplanation(args: {
 }): Promise<SavedExplanation> {
   const now = new Date().toISOString();
   const exp: SavedExplanation = {
-    id: crypto.randomUUID(),
+    id: getRandomUUID(),
     documentId: args.documentId,
     selectedText: args.selectedText,
     contextBefore: args.contextBefore,
@@ -164,7 +182,7 @@ export async function createExplanation(args: {
     createdAt: now,
     updatedAt: now,
     messages: args.messages.map((m, i) => ({
-      id: crypto.randomUUID(),
+      id: getRandomUUID(),
       role: m.role,
       content: m.content,
       createdAt: now,
@@ -187,7 +205,7 @@ export async function appendExplanationMessages(
     ? existing.messages[existing.messages.length - 1].sequence + 1
     : 0;
   const appended: ExplanationMessage[] = messages.map((m, i) => ({
-    id: crypto.randomUUID(),
+    id: getRandomUUID(),
     role: m.role,
     content: m.content,
     createdAt: now,
