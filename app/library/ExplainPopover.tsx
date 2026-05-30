@@ -7,7 +7,6 @@ import { Loader2, Save, Send, Sparkles, Square, AlertCircle, RotateCcw } from 'l
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { readApiKey } from '@/lib/use-api-key';
 import { createExplanation, appendExplanationMessages } from '@/lib/storage';
 
@@ -163,7 +162,7 @@ export default function ExplainPopover({
 
   return (
     <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
-      <DialogContent data-explain-popover className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-xl">
+      <DialogContent data-explain-popover className="flex h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
         {/* Header */}
         <div className="border-b border-border p-3 pr-12">
           <DialogTitle className="flex items-center gap-2 text-sm font-medium">
@@ -177,9 +176,12 @@ export default function ExplainPopover({
           <p className="text-xs italic text-muted-foreground">&ldquo;{truncatedSelection}&rdquo;</p>
         </div>
 
-        {/* Thread */}
-        <ScrollArea className="flex-1">
-          <div ref={threadRef} className="space-y-4 p-4 text-sm">
+        {/* Thread — plain overflow-y-auto rather than Radix ScrollArea so
+            the height behaviour inside the flex column is predictable.
+            `min-h-0` is the standard escape hatch for flex's default
+            `min-height: auto` that would otherwise refuse to shrink. */}
+        <div ref={threadRef} className="min-h-0 flex-1 overflow-y-auto">
+          <div className="space-y-4 p-4 text-sm">
             {visibleMessages.length === 0 && isStreaming && (
               <div className="flex items-center gap-2 text-muted-foreground animate-pulse-soft">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
@@ -214,7 +216,7 @@ export default function ExplainPopover({
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
         {/* Composer */}
         <div className="border-t border-border p-3">
