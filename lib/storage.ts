@@ -6,7 +6,17 @@
 // run statelessly on Vercel / any edge host.
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
-import type { Document, ExplanationMessage, FileType, SavedExplanation } from './types';
+import type {
+  ClubDoc,
+  ClubOutboxOp,
+  Document,
+  ExplanationMessage,
+  FileType,
+  PersonalSyncMeta,
+  PersonalSyncOp,
+  SavedExplanation,
+  SharedAnnotationCache,
+} from './types';
 
 function getRandomUUID(): string {
   if (typeof window !== 'undefined' && window.crypto) {
@@ -35,10 +45,37 @@ interface ReadAuraDB extends DBSchema {
     value: SavedExplanation;
     indexes: { 'by-document': string };
   };
+  // --- v2: club + personal-sync stores (created unconditionally for schema
+  // consistency; written only by flag-gated club code / opt-in personal sync) ---
+  clubDocs: {
+    key: string;
+    value: ClubDoc;
+    indexes: { 'by-logicalId': string; 'by-localDocumentId': string };
+  };
+  sharedAnnotations: {
+    key: string;
+    value: SharedAnnotationCache;
+    indexes: { 'by-logicalId': string };
+  };
+  clubOutbox: {
+    key: string;
+    value: ClubOutboxOp;
+    indexes: { 'by-createdAt': string };
+  };
+  personalSyncQueue: {
+    key: string;
+    value: PersonalSyncOp;
+    indexes: { 'by-createdAt': string };
+  };
+  personalSyncMeta: { key: string; value: PersonalSyncMeta };
 }
 
 const DB_NAME = 'readaura';
-const DB_VERSION = 1;
+// v2 adds the (empty, inert) club + personal-sync stores. The upgrade is
+// purely additive and guarded by `!contains()`, so an existing v1 database
+// migrates by creating the new stores only — the four original stores and all
+// existing rows are never touched.
+const DB_VERSION = 2;
 
 let _dbPromise: Promise<IDBPDatabase<ReadAuraDB>> | null = null;
 
@@ -61,6 +98,28 @@ function db(): Promise<IDBPDatabase<ReadAuraDB>> {
         if (!d.objectStoreNames.contains('explanations')) {
           const store = d.createObjectStore('explanations', { keyPath: 'id' });
           store.createIndex('by-document', 'documentId');
+        }
+        // v2 additive stores. Guarded individually so this branch is safe to
+        // run from any prior version (fresh install or an existing v1 DB).
+        if (!d.objectStoreNames.contains('clubDocs')) {
+          const s = d.createObjectStore('clubDocs', { keyPath: 'id' });
+          s.createIndex('by-logicalId', 'logicalId');
+          s.createIndex('by-localDocumentId', 'localDocumentId');
+        }
+        if (!d.objectStoreNames.contains('sharedAnnotations')) {
+          const s = d.createObjectStore('sharedAnnotations', { keyPath: 'id' });
+          s.createIndex('by-logicalId', 'logicalId');
+        }
+        if (!d.objectStoreNames.contains('clubOutbox')) {
+          const s = d.createObjectStore('clubOutbox', { keyPath: 'id' });
+          s.createIndex('by-createdAt', 'createdAt');
+        }
+        if (!d.objectStoreNames.contains('personalSyncQueue')) {
+          const s = d.createObjectStore('personalSyncQueue', { keyPath: 'id' });
+          s.createIndex('by-createdAt', 'createdAt');
+        }
+        if (!d.objectStoreNames.contains('personalSyncMeta')) {
+          d.createObjectStore('personalSyncMeta', { keyPath: 'id' });
         }
       },
     });
