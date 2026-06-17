@@ -24,6 +24,37 @@ export function parseRecoveryCode(code: string): { locator: string; secret: stri
   return { locator: trimmed.slice(0, i), secret: trimmed.slice(i + 1) };
 }
 
+// ---- Invite codes: short, readable, product-key style ---------------------
+// Single-use + owner-minted + consumed on first redeem, so they don't need
+// recovery-grade entropy. 6-char locator (lookup) + 10-char secret (hashed),
+// Crockford base32 (no ambiguous I/L/O/U), shown grouped as XXXX-XXXX-XXXX-XXXX.
+
+const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+function randomBase32(n: number): string {
+  const bytes = randomBytes(n);
+  let out = '';
+  for (let i = 0; i < n; i++) out += CROCKFORD[bytes[i] & 31];
+  return out;
+}
+
+export function genInviteCode(): { locator: string; secret: string; code: string } {
+  const locator = randomBase32(6);
+  const secret = randomBase32(10);
+  const code = (locator + secret).replace(/(.{4})(?=.)/g, '$1-');
+  return { locator, secret, code };
+}
+
+export function parseInviteCode(code: string): { locator: string; secret: string } | null {
+  const norm = code
+    .toUpperCase()
+    .replace(/O/g, '0')
+    .replace(/[IL]/g, '1')
+    .replace(/[^0-9A-Z]/g, '');
+  if (norm.length !== 16) return null;
+  return { locator: norm.slice(0, 6), secret: norm.slice(6) };
+}
+
 export function hashSecret(secret: string): Promise<string> {
   return argonHash(secret);
 }

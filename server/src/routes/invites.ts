@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { db } from '../db/client';
 import { invites } from '../db/schema';
 import { requireMember, type MemberVars } from '../middleware/auth';
-import { genRecoveryParts, hashSecret } from '../lib/auth';
+import { genInviteCode, hashSecret } from '../lib/auth';
 import type { CreateInviteRequest, CreateInviteResponse, MemberRole } from '../../../shared/club-types';
 
 export const invitesRoutes = new Hono<MemberVars>();
@@ -19,7 +19,7 @@ invitesRoutes.post('/', async (c) => {
   const role: MemberRole = body?.role === 'owner' ? 'owner' : 'member';
   const label = body?.label?.trim() || null;
 
-  const rec = genRecoveryParts();
+  const rec = genInviteCode();
   await db.insert(invites).values({
     clubId,
     locator: rec.locator,

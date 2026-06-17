@@ -6,6 +6,7 @@ import {
   genRecoveryParts,
   hashSecret,
   mintToken,
+  parseInviteCode,
   parseRecoveryCode,
   verifySecret,
 } from '../lib/auth';
@@ -27,7 +28,7 @@ authRoutes.post('/join', async (c) => {
   if (!body?.inviteCode || !body.displayName?.trim()) {
     return c.json({ error: 'inviteCode and displayName required' }, 400);
   }
-  const parsed = parseRecoveryCode(body.inviteCode); // invites share the locator.secret format
+  const parsed = parseInviteCode(body.inviteCode);
   if (!parsed) return c.json({ error: 'invalid invite code' }, 401);
 
   const [club] = await db.select().from(clubs).limit(1);
