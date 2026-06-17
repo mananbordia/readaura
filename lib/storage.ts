@@ -135,23 +135,13 @@ export async function getFile(id: string): Promise<Blob | null> {
   return row?.blob ?? null;
 }
 
-export async function setFileText(id: string, text: string): Promise<void> {
-  const d = await db();
-  const blob = new Blob([text], { type: 'text/plain' });
-  const tx = d.transaction(['documents', 'files'], 'readwrite');
-  const existing = await tx.objectStore('documents').get(id);
-  if (existing) {
-    await tx.objectStore('documents').put({ ...existing, fileSize: blob.size });
-  }
-  await tx.objectStore('files').put({ id, blob });
-  await tx.done;
-}
-
-// ---- HTML overrides (edited DOCX) --------------------------------------
+// ---- HTML overrides (edited DOCX / TXT) --------------------------------
 
 export async function getHtmlOverride(id: string): Promise<string | null> {
   const row = await (await db()).get('htmlOverrides', id);
-  return row?.html ?? null;
+  // Treat an empty override as absent so the original blob is re-read (and a
+  // doc whose edit collapsed to nothing can recover on reload).
+  return row?.html || null;
 }
 
 export async function setHtmlOverride(id: string, html: string): Promise<void> {

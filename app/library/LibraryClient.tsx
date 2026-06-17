@@ -3,18 +3,19 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { UIMessage } from 'ai';
 import {
-  ArrowDownUp, ArrowLeft, FileText, FileType2, Loader2, Minus, PencilLine, Plus,
+  ArrowDownUp, ArrowLeft, ClipboardPaste, FileText, FileType2, Loader2, Minus, PencilLine, Plus,
   Save, Search, Sparkles, Tags, Trash2, Upload, X, Volume2, Pause, Play, Square, MessageSquare,
 } from 'lucide-react';
 import type { Document, FileType, SavedExplanation } from '@/lib/types';
 import {
-  listDocuments, getDocument, createDocument, updateDocument, deleteDocument,
-  getFile, setFileText, getHtmlOverride, setHtmlOverride,
+  listDocuments, createDocument, updateDocument, deleteDocument,
+  getFile, getHtmlOverride, setHtmlOverride,
 } from '@/lib/storage';
 import { extractPdfText } from '@/lib/pdf-text';
 import { convertDocxBlobToHtml } from '@/lib/docx-html';
 import ExplainPopover from './ExplainPopover';
 import SavedExplanationsDrawer from './SavedExplanationsDrawer';
+import { EditorToolbar } from '@/components/editor-toolbar';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -88,6 +89,32 @@ function textToHtml(text: string): string {
     .join('');
 }
 
+// Accepted upload formats. Markdown is stored as plain text (fileType 'txt').
+const UPLOAD_ACCEPT = '.pdf,.docx,.txt,.md';
+const ACCEPTED_EXTS = ['pdf', 'docx', 'txt', 'md'];
+
+function fileTypeForExt(ext: string | undefined): FileType | null {
+  if (ext === 'pdf') return 'pdf';
+  if (ext === 'docx') return 'docx';
+  if (ext === 'txt' || ext === 'md') return 'txt';
+  return null;
+}
+
+function stripExt(name: string): string {
+  return name.replace(/\.[^.]+$/, '');
+}
+
+// Fall back to the first usable line when a pasted text has no explicit title.
+// Leading Markdown heading markers are stripped; lines that are only markers
+// are skipped so the next real line is used.
+function deriveTitleFromText(text: string): string {
+  for (const line of text.split('\n')) {
+    const cleaned = line.replace(/^\s*#+\s*/, '').slice(0, 80).trim();
+    if (cleaned) return cleaned;
+  }
+  return 'Untitled';
+}
+
 type Props = {
   aiConfigured: boolean;
 };
@@ -128,11 +155,9 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editTags, setEditTags] = useState<string[]>([]);
-  const [txtEditing, setTxtEditing] = useState(false);
-  const [txtEditContent, setTxtEditContent] = useState('');
-  const [txtSaving, setTxtSaving] = useState(false);
-  const [docxEditing, setDocxEditing] = useState(false);
-  const [docxSaving, setDocxSaving] = useState(false);
+  // Unified rich-text editor (used for both TXT and DOCX viewers).
+  const [editing, setEditing] = useState(false);
+  const [editorSaving, setEditorSaving] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Welcome modal
@@ -177,6 +202,9 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
 
   // Viewer ref for selection + TTS highlighting
   const docxViewerRef = useRef<HTMLDivElement>(null);
+  // Always-mounted Edit/Save button — focus returns here when leaving edit mode
+  // so keyboard/SR focus doesn't fall back to <body>.
+  const editButtonRef = useRef<HTMLButtonElement>(null);
 
   // Selection / explain state
   type SelectionInfo = {
@@ -193,7 +221,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
 
   useEffect(() => {
     const viewer = docxViewerRef.current;
-    if (!viewer || docxEditing) return;
+    if (!viewer || editing) return;
 
     const handlePointerUp = () => {
       setTimeout(() => {
@@ -243,7 +271,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
       viewer.removeEventListener('pointerup', handlePointerUp);
       document.removeEventListener('pointerdown', handleDocumentPointerDown);
     };
-  }, [docxEditing, docxHtml, selectedDocument?.id]);
+  }, [editing, docxHtml, selectedDocument?.id]);
 
   const handleOpenExplain = () => {
     if (!selectionInfo) return;
@@ -315,6 +343,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
   const [uploadTags, setUploadTags] = useState<string[]>([]);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [pasteText, setPasteText] = useState('');
+  const [uploadTab, setUploadTab] = useState<'files' | 'paste'>('files');
 
   const allTags = useMemo(() => Array.from(new Set(documents.flatMap(d => d.tags))), [documents]);
 
@@ -323,20 +352,23 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
     setUploadTags([]);
     setUploadFiles([]);
     setPasteText('');
+    setUploadTab('files');
     if (fileInputRef.current) fileInputRef.current.value = '';
+    // Also reset the empty-state picker so re-selecting the same file re-fires onChange.
+    if (emptyStateFileRef.current) emptyStateFileRef.current.value = '';
   };
 
   const onPickFiles = (files: FileList | File[] | null) => {
     if (!files) return;
-    const arr = Array.from(files).filter(f => {
-      const ext = f.name.split('.').pop()?.toLowerCase();
-      return ext === 'pdf' || ext === 'docx';
-    });
+    const arr = Array.from(files).filter(f =>
+      ACCEPTED_EXTS.includes(f.name.split('.').pop()?.toLowerCase() ?? ''),
+    );
     if (arr.length === 0) {
-      setError('Only PDF and DOCX files are allowed.');
+      setError('Only PDF, DOCX, TXT, and Markdown files are allowed.');
       return;
     }
     setUploadFiles(arr);
+    setUploadTab('files');
     setShowUpload(true);
   };
 
@@ -351,21 +383,23 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
 
     for (const file of uploadFiles) {
       const ext = file.name.split('.').pop()?.toLowerCase();
-      if (ext !== 'pdf' && ext !== 'docx') {
-        errors.push(`${file.name}: not a PDF or DOCX`);
+      const fileType = fileTypeForExt(ext);
+      if (!fileType) {
+        errors.push(`${file.name}: unsupported file type`);
         continue;
       }
+      const baseName = stripExt(file.name);
       const title = uploadFiles.length === 1 && uploadTitle.trim()
         ? uploadTitle.trim()
         : uploadTitle.trim()
-          ? `${uploadTitle.trim()} - ${file.name.replace(/\.[^.]+$/, '')}`
-          : file.name.replace(/\.[^.]+$/, '');
+          ? `${uploadTitle.trim()} - ${baseName}`
+          : baseName;
       try {
         await createDocument({
           blob: file,
           title,
           tags: uploadTags,
-          fileType: ext as FileType,
+          fileType,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'unknown';
@@ -385,14 +419,13 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
   const handlePasteUpload = async () => {
     const text = pasteText.trim();
     if (!text) { setError('Paste some text first.'); return; }
-    if (!uploadTitle.trim()) { setError('Pasted text needs a title.'); return; }
     setUploading(true);
     setError('');
     try {
       const blob = new Blob([text], { type: 'text/plain' });
       await createDocument({
         blob,
-        title: uploadTitle.trim(),
+        title: uploadTitle.trim() || deriveTitleFromText(text),
         tags: uploadTags,
         fileType: 'txt',
       });
@@ -496,11 +529,18 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
     const parser = new DOMParser();
     const docDom = parser.parseFromString(`<div>${rawHtml}</div>`, 'text/html');
     const container = docDom.body.firstElementChild!;
-    const allEls = container.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, table');
+    // Drop any stale tags from a previous pass so re-processing edited HTML
+    // (which already carries data-tts-index attributes) stays idempotent.
+    container.querySelectorAll('[data-tts-index]').forEach(el => el.removeAttribute('data-tts-index'));
+    const allEls = container.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, table');
 
     for (const el of allEls) {
       const tag = el.tagName.toLowerCase();
       if (tag !== 'table' && el.closest('table')) continue;
+      // A blockquote that wraps its own block (e.g. <blockquote><p>…</p></blockquote>)
+      // is read via that inner block; only tag a blockquote holding text directly
+      // (what the toolbar's Quote button produces) so it isn't read twice.
+      if (tag === 'blockquote' && el.querySelector('p, h1, h2, h3, h4, h5, h6, li')) continue;
 
       if (tag === 'table') {
         el.setAttribute('data-tts-index', String(items.length));
@@ -552,7 +592,9 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
         const override = await getHtmlOverride(doc.id);
         const rawHtml = override ?? await convertDocxBlobToHtml(blob);
         const { html, items } = processDocxHtml(rawHtml);
-        setDocxHtml(html);
+        // Fall back to an empty paragraph so a blank document stays viewable /
+        // editable rather than getting stuck on the loading spinner.
+        setDocxHtml(html || '<p></p>');
         ttsItemsRef.current = items;
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to load document.';
@@ -560,9 +602,14 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
       }
     } else if (doc.fileType === 'txt') {
       try {
-        const text = await blob.text();
-        const { html, items } = processDocxHtml(textToHtml(text));
-        setDocxHtml(html);
+        // Prefer the user's edited HTML (rich-text edits are persisted as an
+        // override, same as DOCX); otherwise wrap the raw text into paragraphs.
+        const override = await getHtmlOverride(doc.id);
+        const rawHtml = override ?? textToHtml(await blob.text());
+        const { html, items } = processDocxHtml(rawHtml);
+        // Fall back to an empty paragraph so a blank file stays viewable /
+        // editable rather than getting stuck on the loading spinner.
+        setDocxHtml(html || '<p></p>');
         ttsItemsRef.current = items;
       } catch {
         setDocxHtml('<p>Failed to load text.</p>');
@@ -588,48 +635,61 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
     }
   };
 
-  const handleTxtEdit = async () => {
-    if (!selectedDocument) return;
-    if (!txtEditing) {
-      try {
-        const blob = await getFile(selectedDocument.id);
-        setTxtEditContent(blob ? await blob.text() : '');
-        setTxtEditing(true);
-        stopTts();
-      } catch {
-        setError('Failed to load text for editing.');
-      }
+  // Runs a contentEditable formatting command, keeping focus in the editor so
+  // the active selection isn't lost (toolbar buttons also preventDefault).
+  const execEditorCommand = useCallback((command: string, value?: string) => {
+    const el = docxViewerRef.current;
+    if (el) el.focus();
+    try { document.execCommand(command, false, value); } catch { /* unsupported command */ }
+  }, []);
+
+  // Unified edit toggle for TXT and DOCX. Entering edit mode makes the
+  // already-rendered viewer contentEditable; saving persists the HTML as an
+  // override (the same store DOCX edits already use).
+  const handleToggleEdit = async () => {
+    if (editorSaving) return; // guard the keyboard (Cmd+S) path; the button is disabled
+    if (!selectedDocument || !docxViewerRef.current) return;
+    if (!editing) {
+      setEditing(true);
+      stopTts();
+      setTimeout(() => docxViewerRef.current?.focus(), 0);
       return;
     }
-    setTxtSaving(true);
+    setEditorSaving(true);
     try {
-      await setFileText(selectedDocument.id, txtEditContent);
-      setDocuments(await listDocuments());
-      const { html, items } = processDocxHtml(textToHtml(txtEditContent));
-      setDocxHtml(html);
-      ttsItemsRef.current = items;
-      setTxtEditing(false);
-    } catch {
-      setError('Failed to save.');
-    }
-    setTxtSaving(false);
-  };
-
-  const handleDocxEdit = async () => {
-    if (!selectedDocument || !docxViewerRef.current) return;
-    if (!docxEditing) { setDocxEditing(true); stopTts(); return; }
-    setDocxSaving(true);
-    try {
-      const editedHtml = docxViewerRef.current.innerHTML;
+      // Normalise an emptied editor to a single paragraph so the viewer never
+      // collapses to the "Loading…" state (which would unmount the editable
+      // node and lock the user out of re-editing).
+      const raw = docxViewerRef.current.innerHTML;
+      const editedHtml = raw.trim() ? raw : '<p></p>';
       await setHtmlOverride(selectedDocument.id, editedHtml);
       const { html, items } = processDocxHtml(editedHtml);
       setDocxHtml(html);
       ttsItemsRef.current = items;
-      setDocxEditing(false);
+      setEditing(false);
+      setTimeout(() => editButtonRef.current?.focus(), 0);
     } catch {
       setError('Failed to save.');
     }
-    setDocxSaving(false);
+    setEditorSaving(false);
+  };
+
+  // Discard unsaved edits by restoring the last-rendered HTML into the
+  // contentEditable node (React won't revert it on its own since docxHtml
+  // hasn't changed).
+  const handleCancelEdit = () => {
+    if (docxViewerRef.current) docxViewerRef.current.innerHTML = docxHtml;
+    setEditing(false);
+    setTimeout(() => editButtonRef.current?.focus(), 0);
+  };
+
+  const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!(e.metaKey || e.ctrlKey)) return;
+    const k = e.key.toLowerCase();
+    if (k === 'b') { e.preventDefault(); execEditorCommand('bold'); }
+    else if (k === 'i') { e.preventDefault(); execEditorCommand('italic'); }
+    else if (k === 'u') { e.preventDefault(); execEditorCommand('underline'); }
+    else if (k === 's') { e.preventDefault(); handleToggleEdit(); }
   };
 
   const audioCacheRef = useRef<Map<string, string>>(new Map());
@@ -907,6 +967,20 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
 
   const libraryIsEmpty = docsLoaded && documents.length === 0;
 
+  // Upload-dialog title hints. The title is always optional; the placeholder
+  // and helper text make the fallback (file name / first line) explicit.
+  const derivedFileTitle = uploadFiles.length === 1 ? stripExt(uploadFiles[0].name) : '';
+  const uploadTitlePlaceholder = uploadTab === 'files'
+    ? (derivedFileTitle || 'Document title…')
+    : 'Document title…';
+  const uploadTitleHelp = uploadTab === 'paste'
+    ? 'Optional — the first line of the text is used if left blank.'
+    : uploadFiles.length > 1
+      ? 'Optional — each file uses its own name (any title you type is added as a prefix).'
+      : derivedFileTitle
+        ? `Optional — defaults to “${derivedFileTitle}”.`
+        : 'Optional — defaults to the file name.';
+
   // ====== Render ======
   return (
     <main className={cn(
@@ -925,7 +999,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
             <div className="rounded-xl border-2 border-dashed border-primary bg-background/90 px-8 py-6 text-center">
               <Upload className="mx-auto mb-2 h-8 w-8 text-primary" />
               <div className="text-lg font-medium">Drop to upload</div>
-              <div className="text-sm text-muted-foreground">PDF and DOCX only</div>
+              <div className="text-sm text-muted-foreground">PDF, DOCX, TXT &amp; Markdown</div>
             </div>
           </div>
         )}
@@ -1047,13 +1121,13 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
                   <div>
                     <div className="font-medium">Your library is empty</div>
                     <p className="text-sm text-muted-foreground">
-                      Drop a PDF or DOCX anywhere on this page, or pick a file below.
+                      Drop a PDF, DOCX, TXT, or Markdown file anywhere on this page, or pick one below.
                     </p>
                   </div>
                   <input
                     ref={emptyStateFileRef}
                     type="file"
-                    accept=".pdf,.docx"
+                    accept={UPLOAD_ACCEPT}
                     multiple
                     className="hidden"
                     onChange={e => onPickFiles(e.target.files)}
@@ -1176,7 +1250,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => { setSelectedDocument(null); setDocxHtml(''); stopTts(); setTxtEditing(false); setDocxEditing(false); }}
+                  onClick={() => { setSelectedDocument(null); setDocxHtml(''); stopTts(); setEditing(false); }}
                 >
                   <ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">Back</span>
                 </Button>
@@ -1186,20 +1260,14 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
                 <Button variant="outline" size="sm" onClick={() => setDrawerOpen(true)}>
                   <MessageSquare className="h-4 w-4" /> <span className="hidden sm:inline">Explanations</span>
                 </Button>
-                {selectedDocument.fileType === 'txt' && (
-                  <Button size="sm" variant="outline" onClick={handleTxtEdit} disabled={txtSaving}>
-                    {txtSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PencilLine className="h-3.5 w-3.5" />}
-                    <span className="hidden sm:inline">{txtEditing ? 'Save' : 'Edit'}</span>
+                {selectedDocument.fileType !== 'pdf' && (
+                  <Button ref={editButtonRef} size="sm" variant={editing ? 'default' : 'outline'} onClick={handleToggleEdit} disabled={editorSaving}>
+                    {editorSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : editing ? <Save className="h-3.5 w-3.5" /> : <PencilLine className="h-3.5 w-3.5" />}
+                    <span className="hidden sm:inline">{editing ? 'Save' : 'Edit'}</span>
                   </Button>
                 )}
-                {selectedDocument.fileType === 'docx' && (
-                  <Button size="sm" variant="outline" onClick={handleDocxEdit} disabled={docxSaving}>
-                    {docxSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PencilLine className="h-3.5 w-3.5" />}
-                    <span className="hidden sm:inline">{docxEditing ? 'Save' : 'Edit'}</span>
-                  </Button>
-                )}
-                {(txtEditing || docxEditing) && (
-                  <Button size="sm" variant="ghost" onClick={() => { setTxtEditing(false); setDocxEditing(false); }}>Cancel</Button>
+                {editing && (
+                  <Button size="sm" variant="ghost" onClick={handleCancelEdit}>Cancel</Button>
                 )}
               </div>
             </div>
@@ -1276,25 +1344,23 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
                 )}
               </div>
             ) : (
-              txtEditing ? (
-                <Textarea
-                  value={txtEditContent}
-                  onChange={e => setTxtEditContent(e.target.value)}
-                  className="h-[80vh] w-full resize-y font-serif text-base leading-relaxed"
-                />
-              ) : docxHtml ? (
-                <div
-                  ref={docxViewerRef}
-                  className={cn(
-                    'reader-prose max-h-[80vh] overflow-y-auto rounded-lg border border-border bg-card p-4 sm:p-6 md:p-10',
-                    ttsActive && 'tts-active',
-                    docxEditing && 'outline outline-1 outline-dashed outline-primary',
-                  )}
-                  contentEditable={docxEditing}
-                  suppressContentEditableWarning={docxEditing}
-                  onClick={docxEditing ? undefined : handleDocxClick}
-                  dangerouslySetInnerHTML={{ __html: docxHtml }}
-                />
+              (docxHtml || editing) ? (
+                <div className="space-y-2">
+                  {editing && <EditorToolbar exec={execEditorCommand} />}
+                  <div
+                    ref={docxViewerRef}
+                    className={cn(
+                      'reader-prose max-h-[80vh] overflow-y-auto rounded-lg border border-border bg-card p-4 sm:p-6 md:p-10',
+                      ttsActive && 'tts-active',
+                      editing && 'outline outline-1 outline-dashed outline-primary focus:outline-2',
+                    )}
+                    contentEditable={editing}
+                    suppressContentEditableWarning
+                    onKeyDown={editing ? handleEditorKeyDown : undefined}
+                    onClick={editing ? undefined : handleDocxClick}
+                    dangerouslySetInnerHTML={{ __html: docxHtml }}
+                  />
+                </div>
               ) : (
                 <div className="flex items-center justify-center rounded-lg border border-border bg-card p-12 text-sm text-muted-foreground">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading document…
@@ -1332,7 +1398,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
             </DialogDescription>
           </DialogHeader>
           <ol className="space-y-2 text-sm">
-            <li><strong>Upload</strong> — drop a PDF or DOCX anywhere on the page, or click <em>Upload</em>.</li>
+            <li><strong>Upload</strong> — drop a PDF, DOCX, TXT, or Markdown file anywhere on the page, paste text, or click <em>Upload</em>.</li>
             <li><strong>Highlight</strong> — select any passage to get an AI explanation, with multi-turn follow-ups.</li>
             <li><strong>Read aloud</strong> — neural-voice TTS, click-to-jump, paragraph highlighting.</li>
           </ol>
@@ -1361,19 +1427,48 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
       <Dialog open={showUpload} onOpenChange={open => { setShowUpload(open); if (!open) resetUploadForm(); }}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Upload a document</DialogTitle>
-            <DialogDescription>PDF, DOCX, or paste raw text.</DialogDescription>
+            <DialogTitle>Add a document</DialogTitle>
+            <DialogDescription>Upload a PDF, DOCX, TXT, or Markdown file — or paste text.</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3">
+          <div className="space-y-4">
+            {/* Source switcher */}
+            <div role="group" aria-label="Document source" className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1 text-sm">
+              <button
+                type="button"
+                aria-pressed={uploadTab === 'files'}
+                onClick={() => setUploadTab('files')}
+                className={cn(
+                  'flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 font-medium transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                  uploadTab === 'files' ? 'border-border bg-background text-foreground shadow-sm' : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <Upload className="h-4 w-4" /> Upload files
+              </button>
+              <button
+                type="button"
+                aria-pressed={uploadTab === 'paste'}
+                onClick={() => setUploadTab('paste')}
+                className={cn(
+                  'flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 font-medium transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                  uploadTab === 'paste' ? 'border-border bg-background text-foreground shadow-sm' : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <ClipboardPaste className="h-4 w-4" /> Paste text
+              </button>
+            </div>
+
             <div className="space-y-1.5">
-              <Label htmlFor="title">Title (optional for multi-upload)</Label>
+              <Label htmlFor="title">Title <span className="font-normal text-muted-foreground">(optional)</span></Label>
               <Input
                 id="title"
                 value={uploadTitle}
                 onChange={e => setUploadTitle(e.target.value)}
-                placeholder="Document title…"
+                placeholder={uploadTitlePlaceholder}
               />
+              <p className="text-xs text-muted-foreground">{uploadTitleHelp}</p>
             </div>
 
             <div className="space-y-1.5">
@@ -1381,47 +1476,53 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
               <TagInput value={uploadTags} onChange={setUploadTags} suggestions={allTags} placeholder="research, philosophy, biology…" />
             </div>
 
-            <div className="space-y-1.5">
-              <Label>Files</Label>
-              <div className="flex items-center gap-2">
+            {uploadTab === 'files' ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="file">Files</Label>
                 <Input
+                  id="file"
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf,.docx"
+                  accept={UPLOAD_ACCEPT}
                   multiple
-                  onChange={e => setUploadFiles(Array.from(e.target.files || []))}
+                  onChange={e => setUploadFiles(
+                    Array.from(e.target.files || []).filter(f =>
+                      ACCEPTED_EXTS.includes(f.name.split('.').pop()?.toLowerCase() ?? ''),
+                    ),
+                  )}
                   className="flex-1"
                 />
+                {uploadFiles.length > 0 && (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {uploadFiles.length} file{uploadFiles.length === 1 ? '' : 's'} selected: {uploadFiles.map(f => f.name).join(', ')}
+                  </p>
+                )}
+                <Button onClick={handleUploadFiles} disabled={uploading || uploadFiles.length === 0} className="w-full sm:w-auto">
+                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  Upload {uploadFiles.length > 0 ? `(${uploadFiles.length})` : ''}
+                </Button>
               </div>
-              {uploadFiles.length > 0 && (
-                <p className="text-xs text-muted-foreground">{uploadFiles.length} file{uploadFiles.length === 1 ? '' : 's'} selected</p>
-              )}
-              <Button onClick={handleUploadFiles} disabled={uploading || uploadFiles.length === 0} className="w-full sm:w-auto">
-                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                Upload {uploadFiles.length > 0 ? `(${uploadFiles.length})` : ''}
-              </Button>
-            </div>
-
-            <div className="border-t border-border pt-3">
-              <Label htmlFor="paste">Or paste text</Label>
-              <Textarea
-                id="paste"
-                value={pasteText}
-                onChange={e => setPasteText(e.target.value)}
-                placeholder="Paste document text here…"
-                rows={4}
-                className="mt-1.5"
-              />
-              <Button
-                onClick={handlePasteUpload}
-                disabled={uploading || !pasteText.trim()}
-                variant="outline"
-                className="mt-2 w-full sm:w-auto"
-              >
-                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                Save text
-              </Button>
-            </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="paste">Text</Label>
+                <Textarea
+                  id="paste"
+                  value={pasteText}
+                  onChange={e => setPasteText(e.target.value)}
+                  placeholder="Paste or write document text here…"
+                  rows={8}
+                />
+                <Button
+                  onClick={handlePasteUpload}
+                  disabled={uploading || !pasteText.trim()}
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                >
+                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                  Save text
+                </Button>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
