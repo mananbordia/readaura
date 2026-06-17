@@ -4,6 +4,7 @@ import { env } from './env';
 import { proxyGuard } from './middleware/proxy-guard';
 import { ensureSeed } from './seed';
 import { authRoutes } from './routes/auth';
+import { blobsRoutes, docsRoutes } from './routes/docs';
 
 const app = new Hono();
 
@@ -15,8 +16,13 @@ app.get('/health', (c) => c.json({ ok: true, service: 'readaura-club' }));
 app.use('/auth/*', proxyGuard);
 app.route('/auth', authRoutes);
 
-// Phase 2 mounts /docs, /blob; Phase 3 mounts /annotations; the personal-sync
-// track mounts /sync — each behind its own proxyGuard.
+app.use('/docs/*', proxyGuard);
+app.use('/blobs/*', proxyGuard);
+app.route('/docs', docsRoutes);
+app.route('/blobs', blobsRoutes);
+
+// Phase 3 mounts /annotations; the personal-sync track mounts /sync — each
+// behind its own proxyGuard.
 
 await ensureSeed();
 
