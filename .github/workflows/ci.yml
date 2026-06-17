@@ -30,3 +30,9 @@ jobs:
         run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: '1'
+
+      # Build above runs with NEXT_PUBLIC_CLUB_ENABLED unset (the default/demo
+      # build), so the client bundle must contain no club code. Guards
+      # invariant #5: club off == byte-for-byte today.
+      - name: Flag-off parity
+        run: npm run check:parity
