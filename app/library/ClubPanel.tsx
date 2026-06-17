@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  BookUp, Check, Copy, Download, Globe, Loader2, LogOut, RefreshCw, Trash2,
+  BookUp, Check, Copy, Download, Globe, Loader2, LogOut, RefreshCw, Trash2, UserPlus,
 } from 'lucide-react';
 import type { Document } from '@/lib/types';
 import { CLUB_SNAPSHOT_FORMAT_VERSION, type PublishedDocDTO } from '@/shared/club-types';
@@ -54,6 +54,12 @@ export default function ClubPanel({
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Owner-only: mint single-use member invites.
+  const [inviteLabel, setInviteLabel] = useState('');
+  const [minting, setMinting] = useState(false);
+  const [mintedInvite, setMintedInvite] = useState<string | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
+
   const linkByLogical = new Map(links.map((l) => [l.logicalId, l] as const));
   const linkByLocal = new Map(
     links.filter((l) => l.localDocumentId).map((l) => [l.localDocumentId as string, l] as const),
@@ -84,7 +90,7 @@ export default function ClubPanel({
         mode === 'join'
           ? await clubApi.join(inviteCode.trim(), displayName.trim())
           : await clubApi.recover(recoveryInput.trim());
-      club.save({ token: res.token, userId: res.userId, displayName: res.displayName });
+      club.save({ token: res.token, userId: res.userId, displayName: res.displayName, role: res.role });
       setRecoveryCode(res.recoveryCode);
       setInviteCode(''); setRecoveryInput('');
     } catch (e) {
@@ -196,6 +202,37 @@ export default function ClubPanel({
     setBusy(null);
   };
 
+  // Sign out must also clear all transient panel state — otherwise a stale
+  // recovery code, the discovered list, and the recover/join mode linger and
+  // bleed into the next session's auth view.
+  const mintInvite = async () => {
+    const token = club.session?.token;
+    if (!token) return;
+    setMinting(true);
+    setError('');
+    try {
+      const res = await clubApi.createInvite(token, inviteLabel.trim() || undefined);
+      setMintedInvite(res.code);
+      setInviteLabel('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create invite.');
+    }
+    setMinting(false);
+  };
+
+  const handleSignOut = () => {
+    club.signOut();
+    setRecoveryCode(null);
+    setMode('join');
+    setInviteCode('');
+    setDisplayName('');
+    setRecoveryInput('');
+    setDocs([]);
+    setError('');
+    setMintedInvite(null);
+    setInviteLabel('');
+  };
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" data-club-panel className="flex w-full flex-col gap-0 p-0 sm:max-w-lg">
@@ -216,11 +253,14 @@ export default function ClubPanel({
           </div>
         )}
 
-        {recoveryCode && (
+        {recoveryCode ? (
+          /* Blocking gate: the recovery code is shown ONCE, so the user must
+             acknowledge it before reaching the signed-in view — and therefore
+             before they can sign out (sign-out lives only in that view). */
           <div className="m-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
             <div className="font-medium">Save your recovery code</div>
             <p className="mt-1 text-muted-foreground">
-              Shown once. If you clear your browser, re-enter it to reclaim your account and published docs.
+              Shown once. It&apos;s the only way to reclaim your account and published docs if you clear your browser or sign out.
             </p>
             <div className="mt-2 flex items-center gap-2">
               <code className="flex-1 break-all rounded bg-background px-2 py-1 font-mono text-xs">{recoveryCode}</code>
@@ -233,9 +273,7 @@ export default function ClubPanel({
             </div>
             <Button size="sm" className="mt-3 w-full" onClick={() => setRecoveryCode(null)}>I&apos;ve saved it</Button>
           </div>
-        )}
-
-        {!club.signedIn ? (
+        ) : !club.signedIn ? (
           <div className="flex flex-col gap-3 p-4">
             {mode === 'join' ? (
               <>
@@ -315,6 +353,36 @@ export default function ClubPanel({
                 )}
               </section>
 
+              {club.session?.role === 'owner' && (
+                <section>
+                  <h3 className="mb-2 text-sm font-semibold">Invite a member</h3>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={inviteLabel}
+                      onChange={(e) => setInviteLabel(e.target.value)}
+                      placeholder="Label (optional, e.g. Alice)"
+                    />
+                    <Button size="sm" onClick={mintInvite} disabled={minting}>
+                      {minting ? <Loader2 className="h-4 w-4 animate-spin" /> : <><UserPlus className="h-4 w-4" /> Create</>}
+                    </Button>
+                  </div>
+                  {mintedInvite && (
+                    <div className="mt-2 rounded-md border border-border bg-muted/40 p-2.5 text-sm">
+                      <p className="text-xs text-muted-foreground">Single-use — share with one new member; it works once.</p>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <code className="flex-1 break-all rounded bg-background px-2 py-1 font-mono text-xs">{mintedInvite}</code>
+                        <Button
+                          size="sm" variant="outline"
+                          onClick={() => { navigator.clipboard?.writeText(mintedInvite); setInviteCopied(true); setTimeout(() => setInviteCopied(false), 1500); }}
+                        >
+                          {inviteCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
+
               <section>
                 <h3 className="mb-2 text-sm font-semibold">Publish from your library</h3>
                 {documents.length === 0 ? (
@@ -356,7 +424,7 @@ export default function ClubPanel({
                 )}
               </section>
 
-              <Button variant="ghost" size="sm" className="self-start text-muted-foreground" onClick={club.signOut}>
+              <Button variant="ghost" size="sm" className="self-start text-muted-foreground" onClick={handleSignOut}>
                 <LogOut className="h-4 w-4" /> Sign out
               </Button>
             </div>

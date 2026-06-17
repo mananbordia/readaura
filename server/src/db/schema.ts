@@ -31,7 +31,6 @@ export const users = pgTable('users', {
 export const clubs = pgTable('clubs', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
-  inviteCodeHash: text('invite_code_hash').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -46,6 +45,21 @@ export const memberships = pgTable(
   },
   (t) => [unique('memberships_user_club').on(t.userId, t.clubId)],
 );
+
+// Single-use, per-member invite codes (`locator.secret`, secret hashed at rest).
+// An owner mints one per member; consuming it on join sets usedAt/usedByUserId.
+export const invites = pgTable('invites', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  clubId: uuid('club_id').notNull().references(() => clubs.id, { onDelete: 'cascade' }),
+  locator: text('locator').notNull().unique(),
+  secretHash: text('secret_hash').notNull(),
+  role: text('role').notNull().default('member'),
+  label: text('label'),
+  createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  usedByUserId: uuid('used_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+});
 
 export const publishedDocs = pgTable(
   'published_docs',

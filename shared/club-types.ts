@@ -77,12 +77,19 @@ export type JoinResponse = {
   token: string;
   userId: string;
   displayName: string;
+  role: MemberRole;
   /** Shown to the user exactly once; re-entering it reclaims this same userId
    *  after a browser wipe. Hashed at rest server-side, rotated on use. */
   recoveryCode: string;
 };
 export type RecoverRequest = { recoveryCode: string };
 export type RecoverResponse = JoinResponse;
+
+// Single-use, per-member invites. An owner mints one code per member; the code
+// is consumed on join. The very first owner bootstraps from a code the server
+// prints to its logs on first start.
+export type CreateInviteRequest = { label?: string; role?: MemberRole };
+export type CreateInviteResponse = { code: string; role: MemberRole; label: string | null };
 
 // ---- Publish / discover --------------------------------------------------
 

@@ -3,6 +3,7 @@
 // the ONLY club network surface on the client.
 
 import type {
+  CreateInviteResponse,
   JoinResponse,
   PublishRequest,
   PublishedDocDTO,
@@ -43,6 +44,13 @@ export const clubApi = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ recoveryCode }),
     }).then((r) => jsonOrThrow<RecoverResponse>(r)),
+
+  createInvite: (token: string, label?: string) =>
+    fetch(`${BASE}/invites`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...auth(token) },
+      body: JSON.stringify({ label }),
+    }).then((r) => jsonOrThrow<CreateInviteResponse>(r)),
 
   discover: (token: string) =>
     fetch(`${BASE}/docs`, { headers: auth(token) }).then((r) => jsonOrThrow<PublishedDocDTO[]>(r)),

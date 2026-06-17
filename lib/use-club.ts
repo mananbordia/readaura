@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { MemberRole } from '@/shared/club-types';
 
 // The club session (member JWT + identity) lives in localStorage, mirroring
 // lib/use-api-key.ts: a custom event keeps every mounted component and other
 // tabs in sync. Private library data never goes here — this is just the club
 // credential.
 
-export type ClubSession = { token: string; userId: string; displayName: string };
+export type ClubSession = { token: string; userId: string; displayName: string; role: MemberRole };
 
 const STORAGE = 'readaura-club-session';
 const CHANGE_EVENT = 'readaura-club-change';
