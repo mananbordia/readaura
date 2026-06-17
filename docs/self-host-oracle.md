@@ -48,9 +48,9 @@ SQL
 ## 3. Get the code + install
 
 ```bash
-sudo mkdir -p /opt/readaura && sudo chown ubuntu:ubuntu /opt/readaura
-git clone <your-repo> /opt/readaura
-cd /opt/readaura/server
+sudo mkdir -p /home/ubuntu/readaura && sudo chown ubuntu:ubuntu /home/ubuntu/readaura
+git clone <your-repo> /home/ubuntu/readaura
+cd /home/ubuntu/readaura/server
 npm ci
 ```
 
@@ -81,32 +81,17 @@ npm run db:migrate
 
 ## 6. Run it under systemd
 
-`/etc/systemd/system/readaura-club.service`:
-
-```ini
-[Unit]
-Description=ReadAura club backend
-After=network.target postgresql.service
-Requires=postgresql.service
-
-[Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=/opt/readaura/server
-EnvironmentFile=/opt/readaura/server/.env
-ExecStart=/usr/bin/npm run start
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-```
+The unit ships in the repo at `server/deploy/readaura-club.service` (mirrors the
+box's `hft-scanner.service`: `User=ubuntu`, `Restart=always`, `MemoryMax`,
+`NoNewPrivileges`, runs `tsx` directly). Install it:
 
 ```bash
+sudo cp /home/ubuntu/readaura/server/deploy/readaura-club.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now readaura-club
-sudo systemctl status readaura-club
+systemctl is-active readaura-club
 curl -s localhost:8080/health    # {"ok":true,"service":"readaura-club"}
+journalctl -u readaura-club -f   # logs (club seeded from CLUB_INVITE_CODE on first start)
 ```
 
 ## 7. Open port 8080 — BOTH layers (Oracle's classic gotcha)
@@ -152,9 +137,9 @@ each user's browser). Back up nightly:
 
 ```bash
 # Postgres
-pg_dump -U readaura readaura_club | gzip > /opt/readaura/backups/db-$(date +%F).sql.gz
-# Blob dir (added in Phase 2; default CLUB_BLOB_DIR=/opt/readaura/blobs)
-tar czf /opt/readaura/backups/blobs-$(date +%F).tgz -C /opt/readaura blobs
+pg_dump -U readaura readaura_club | gzip > /home/ubuntu/readaura/backups/db-$(date +%F).sql.gz
+# Blob dir (added in Phase 2; default CLUB_BLOB_DIR=/home/ubuntu/readaura/blobs)
+tar czf /home/ubuntu/readaura/backups/blobs-$(date +%F).tgz -C /home/ubuntu/readaura blobs
 ```
 
 Wire it to a cron/systemd-timer and copy off-box.

@@ -1,0 +1,26 @@
+# systemd unit for the ReadAura club backend (mirrors the box's hft-scanner.service).
+# Install:
+#   sudo cp /home/ubuntu/readaura/server/deploy/readaura-club.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now readaura-club
+# Logs: journalctl -u readaura-club -f
+
+[Unit]
+Description=ReadAura club backend (Hono + Drizzle + Postgres)
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/readaura/server
+EnvironmentFile=/home/ubuntu/readaura/server/.env
+ExecStart=/home/ubuntu/readaura/server/node_modules/.bin/tsx src/index.ts
+Restart=always
+RestartSec=10
+# Low-traffic CRUD on a shared free-tier box; keep it modest next to the scanner.
+MemoryMax=512M
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
