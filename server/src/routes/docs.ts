@@ -226,6 +226,15 @@ blobsRoutes.get('/:hash', async (c) => {
   if (!HASH_RE.test(hash)) return c.json({ error: 'bad hash' }, 400);
   const buf = await getBlob(hash);
   if (!buf) return c.json({ error: 'not found' }, 404);
+  // A snapshot blob is UNTRUSTED cross-user content (another member's rendered
+  // DOCX/TXT HTML, or a PDF). Serve it inert so navigating straight to this URL
+  // can never be sniffed/rendered as HTML and execute scripts. The client reads
+  // it via fetch() (Content-Type is irrelevant to fetch) and sanitizes the HTML
+  // before injecting it into the DOM — see the open-into-IndexedDB flow.
+  c.header('Content-Type', 'application/octet-stream');
+  c.header('Content-Disposition', 'attachment');
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('Content-Security-Policy', "default-src 'none'; sandbox");
   c.header('ETag', `"${hash}"`);
   c.header('Cache-Control', 'public, max-age=31536000, immutable');
   return c.body(new Uint8Array(buf));
