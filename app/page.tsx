@@ -40,7 +40,7 @@ export default function HomePage() {
     <div className="flex min-h-screen flex-col">
       <Navbar />
 
-      <main className="relative flex flex-1 items-center overflow-hidden px-6 py-8">
+      <main className="relative flex flex-1 items-start px-6 py-8 lg:items-center lg:overflow-hidden">
         {/* Single sophisticated wash — vertical gradient that's nearly invisible,
             just enough to lift the eye toward the headline area. */}
         <div
@@ -56,7 +56,7 @@ export default function HomePage() {
             without painting the page. */}
         <div
           aria-hidden
-          className="pointer-events-none absolute right-[8%] top-1/2 -z-10 h-[36rem] w-[36rem] -translate-y-1/2 rounded-full bg-primary/[0.07] blur-3xl"
+          className="pointer-events-none absolute right-[8%] top-1/2 -z-10 hidden h-[36rem] w-[36rem] -translate-y-1/2 rounded-full bg-primary/[0.07] blur-3xl lg:block"
         />
 
         {/* Film grain — sells the "this is a real artefact, not a CSS demo" feeling.
@@ -78,7 +78,7 @@ export default function HomePage() {
           className="pointer-events-none absolute inset-0 -z-10 opacity-[0.025] [background-image:linear-gradient(to_right,currentColor_1px,transparent_1px),linear-gradient(to_bottom,currentColor_1px,transparent_1px)] [background-size:80px_80px] text-foreground [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_75%)]"
         />
 
-        <div className="mx-auto grid w-full max-w-7xl gap-12 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:items-center lg:gap-16">
+        <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:items-center lg:gap-16">
           {/* ─── Left: BIG brand title + syncing verb + CTAs ─── */}
           <div>
             <h1 className="font-serif text-5xl font-medium leading-[0.98] tracking-[-0.025em] sm:text-6xl lg:text-[5.25rem]">
@@ -93,14 +93,14 @@ export default function HomePage() {
                 re-runs on each change. */}
             <p
               key={`verb-${idx}`}
-              className="mt-8 text-2xl font-medium tracking-tight text-foreground sm:text-[1.625rem]"
+              className="mt-6 text-2xl font-medium tracking-tight text-foreground sm:mt-8 sm:text-[1.625rem]"
               style={{ animation: 'fade-up 0.5s ease-out both' }}
             >
               <span className="text-primary">{sample.verb}.</span>{' '}
               <span className="font-normal text-muted-foreground">{sample.desc}</span>
             </p>
 
-            <div className="mt-10 flex flex-wrap items-center gap-3">
+            <div className="mt-8 flex flex-wrap items-center gap-3 sm:mt-10">
               <Button asChild size="lg">
                 <Link href="/library">
                   Try it now <ArrowRight className="h-4 w-4" />
@@ -114,7 +114,7 @@ export default function HomePage() {
             </div>
 
             {/* Sample progress — three labels with thin progress bars */}
-            <div className="mt-12 flex items-center gap-6">
+            <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-4 sm:mt-12">
               {samples.map((sample, i) => (
                 <button
                   key={sample.verb}
