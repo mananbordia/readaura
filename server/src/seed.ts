@@ -1,7 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from './db/client';
 import { clubs, invites, memberships } from './db/schema';
-import { genInviteCode, hashSecret } from './lib/auth';
+import { genInviteCode } from './lib/auth';
 import { env } from './env';
 
 // Ensure the single club exists, and that the club can be bootstrapped: if no
@@ -36,8 +36,7 @@ export async function ensureSeed(): Promise<void> {
   const rec = genInviteCode();
   await db.insert(invites).values({
     clubId: club.id,
-    locator: rec.locator,
-    secretHash: await hashSecret(rec.secret),
+    codeHash: rec.codeHash,
     role: 'owner',
     label: 'bootstrap owner',
   });

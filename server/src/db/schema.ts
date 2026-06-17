@@ -46,13 +46,14 @@ export const memberships = pgTable(
   (t) => [unique('memberships_user_club').on(t.userId, t.clubId)],
 );
 
-// Single-use, per-member invite codes (`locator.secret`, secret hashed at rest).
-// An owner mints one per member; consuming it on join sets usedAt/usedByUserId.
+// Single-use, per-member invite codes: a short 6-char code, stored as its
+// SHA-256 (fast, indexed lookup; the code is low-value + single-use, so a
+// password hash + brute-force throttle on join is the right tradeoff). An owner
+// mints one per member; consuming it on join sets usedAt/usedByUserId.
 export const invites = pgTable('invites', {
   id: uuid('id').primaryKey().defaultRandom(),
   clubId: uuid('club_id').notNull().references(() => clubs.id, { onDelete: 'cascade' }),
-  locator: text('locator').notNull().unique(),
-  secretHash: text('secret_hash').notNull(),
+  codeHash: text('code_hash').notNull().unique(),
   role: text('role').notNull().default('member'),
   label: text('label'),
   createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),

@@ -279,7 +279,7 @@ export default function ClubPanel({
               <>
                 <div className="grid gap-1.5">
                   <Label htmlFor="club-invite">Invite code</Label>
-                  <Input id="club-invite" value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} placeholder="e.g. 112A948F26" />
+                  <Input id="club-invite" value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} placeholder="6-character invite code" />
                 </div>
                 <div className="grid gap-1.5">
                   <Label htmlFor="club-name">Display name</Label>

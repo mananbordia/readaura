@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { hash as argonHash, verify as argonVerify } from '@node-rs/argon2';
 import { SignJWT, jwtVerify } from 'jose';
 import { env } from '../env';
@@ -24,10 +24,11 @@ export function parseRecoveryCode(code: string): { locator: string; secret: stri
   return { locator: trimmed.slice(0, i), secret: trimmed.slice(i + 1) };
 }
 
-// ---- Invite codes: short, readable, product-key style ---------------------
+// ---- Invite codes: short, shareable 6-char codes --------------------------
 // Single-use + owner-minted + consumed on first redeem, so they don't need
-// recovery-grade entropy. 6-char locator (lookup) + 10-char secret (hashed),
-// Crockford base32 (no ambiguous I/L/O/U), shown grouped as XXXX-XXXX-XXXX-XXXX.
+// recovery-grade entropy. 6 Crockford base32 chars (no ambiguous I/L/O/U) ≈
+// 30 bits, stored as SHA-256 for fast indexed lookup. /join is throttled to
+// blunt brute force; invites are only valid while outstanding (rarely many).
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
@@ -38,21 +39,25 @@ function randomBase32(n: number): string {
   return out;
 }
 
-export function genInviteCode(): { locator: string; secret: string; code: string } {
-  const locator = randomBase32(6);
-  const secret = randomBase32(10);
-  const code = (locator + secret).replace(/(.{4})(?=.)/g, '$1-');
-  return { locator, secret, code };
+function sha256Hex(s: string): string {
+  return createHash('sha256').update(s).digest('hex');
 }
 
-export function parseInviteCode(code: string): { locator: string; secret: string } | null {
-  const norm = code
+export function genInviteCode(): { code: string; codeHash: string } {
+  const code = randomBase32(6);
+  return { code, codeHash: sha256Hex(code) };
+}
+
+// Normalize a pasted/typed code (case, O->0, I/L->1, strip separators) and
+// return its SHA-256 — or null if it isn't 6 valid characters.
+export function inviteCodeToHash(input: string): string | null {
+  const norm = input
     .toUpperCase()
     .replace(/O/g, '0')
     .replace(/[IL]/g, '1')
     .replace(/[^0-9A-Z]/g, '');
-  if (norm.length !== 16) return null;
-  return { locator: norm.slice(0, 6), secret: norm.slice(6) };
+  if (norm.length !== 6) return null;
+  return sha256Hex(norm);
 }
 
 export function hashSecret(secret: string): Promise<string> {

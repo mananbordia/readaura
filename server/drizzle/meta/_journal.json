@@ -15,6 +15,13 @@
       "when": 1781720797146,
       "tag": "0001_wandering_unus",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781737949138,
+      "tag": "0002_club_invite_codehash",
+      "breakpoints": true
     }
   ]
 }

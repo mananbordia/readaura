@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { db } from '../db/client';
 import { invites } from '../db/schema';
 import { requireMember, type MemberVars } from '../middleware/auth';
-import { genInviteCode, hashSecret } from '../lib/auth';
+import { genInviteCode } from '../lib/auth';
 import type { CreateInviteRequest, CreateInviteResponse, MemberRole } from '../../../shared/club-types';
 
 export const invitesRoutes = new Hono<MemberVars>();
@@ -22,8 +22,7 @@ invitesRoutes.post('/', async (c) => {
   const rec = genInviteCode();
   await db.insert(invites).values({
     clubId,
-    locator: rec.locator,
-    secretHash: await hashSecret(rec.secret),
+    codeHash: rec.codeHash,
     role,
     label,
     createdByUserId: c.get('userId'),

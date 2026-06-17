@@ -5,8 +5,8 @@ import { clubs, invites, memberships, users } from '../db/schema';
 import {
   genRecoveryParts,
   hashSecret,
+  inviteCodeToHash,
   mintToken,
-  parseInviteCode,
   parseRecoveryCode,
   verifySecret,
 } from '../lib/auth';
@@ -20,16 +20,34 @@ import type {
 
 export const authRoutes = new Hono();
 
-// Join with a SINGLE-USE invite code (`locator.secret`). The invite is consumed
-// atomically (so it can't be redeemed twice) and its role is granted. A fresh
-// one-time recovery code is returned, shown to the user exactly once.
+// Coarse global throttle for /join — blunts brute force of the short (6-char)
+// invite codes. Legitimate joins are rare, so a generous cap never bites real
+// use. (Per-IP isn't meaningful here: all requests arrive via the Vercel proxy.)
+const JOIN_WINDOW_MS = 60_000;
+const JOIN_MAX = 30;
+let joinCount = 0;
+let joinResetAt = 0;
+function joinAllowed(): boolean {
+  const now = Date.now();
+  if (now > joinResetAt) {
+    joinCount = 0;
+    joinResetAt = now + JOIN_WINDOW_MS;
+  }
+  joinCount += 1;
+  return joinCount <= JOIN_MAX;
+}
+
+// Join with a SINGLE-USE 6-char invite code. The invite is consumed atomically
+// (so it can't be redeemed twice) and its role is granted. A fresh one-time
+// recovery code is returned, shown to the user exactly once.
 authRoutes.post('/join', async (c) => {
+  if (!joinAllowed()) return c.json({ error: 'too many attempts, try again shortly' }, 429);
   const body = await c.req.json<JoinRequest>().catch(() => null);
   if (!body?.inviteCode || !body.displayName?.trim()) {
     return c.json({ error: 'inviteCode and displayName required' }, 400);
   }
-  const parsed = parseInviteCode(body.inviteCode);
-  if (!parsed) return c.json({ error: 'invalid invite code' }, 401);
+  const codeHash = inviteCodeToHash(body.inviteCode);
+  if (!codeHash) return c.json({ error: 'invalid invite code' }, 401);
 
   const [club] = await db.select().from(clubs).limit(1);
   if (!club) return c.json({ error: 'no club configured' }, 503);
@@ -43,12 +61,9 @@ authRoutes.post('/join', async (c) => {
       const [invite] = await tx
         .select()
         .from(invites)
-        .where(and(eq(invites.clubId, club.id), eq(invites.locator, parsed.locator)))
+        .where(and(eq(invites.clubId, club.id), eq(invites.codeHash, codeHash)))
         .limit(1);
       if (!invite || invite.usedAt) return { error: 'invalid or already-used invite', status: 401 as const };
-      if (!(await verifySecret(invite.secretHash, parsed.secret))) {
-        return { error: 'invalid invite code', status: 401 as const };
-      }
 
       const [user] = await tx
         .insert(users)
