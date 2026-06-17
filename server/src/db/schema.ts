@@ -58,6 +58,9 @@ export const invites = pgTable('invites', {
   label: text('label'),
   createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  // Null = never expires (used for the operator-controlled bootstrap invite).
+  // Member invites get a short TTL so the 30-bit code space can't be walked.
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
   usedAt: timestamp('used_at', { withTimezone: true }),
   usedByUserId: uuid('used_by_user_id').references(() => users.id, { onDelete: 'set null' }),
 });

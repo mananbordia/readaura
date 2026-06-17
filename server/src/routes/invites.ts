@@ -26,6 +26,7 @@ invitesRoutes.post('/', async (c) => {
     role,
     label,
     createdByUserId: c.get('userId'),
+    expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000), // 72h to redeem
   });
 
   const res: CreateInviteResponse = { code: rec.code, role, label };

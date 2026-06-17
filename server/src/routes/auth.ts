@@ -20,28 +20,42 @@ import type {
 
 export const authRoutes = new Hono();
 
-// Coarse global throttle for /join — blunts brute force of the short (6-char)
-// invite codes. Legitimate joins are rare, so a generous cap never bites real
-// use. (Per-IP isn't meaningful here: all requests arrive via the Vercel proxy.)
-const JOIN_WINDOW_MS = 60_000;
-const JOIN_MAX = 30;
-let joinCount = 0;
-let joinResetAt = 0;
-function joinAllowed(): boolean {
+// Throttle /join to blunt brute force of the short (6-char) invite codes.
+// The Vercel proxy forwards the real client IP as x-club-client-ip, so we can
+// bucket per-IP (one attacker can't lock everyone out) with a global backstop.
+const PER_IP_MAX = 10;
+const PER_IP_WINDOW_MS = 10 * 60_000;
+const GLOBAL_MAX = 120;
+const GLOBAL_WINDOW_MS = 60_000;
+const ipHits = new Map<string, { count: number; resetAt: number }>();
+let globalCount = 0;
+let globalResetAt = 0;
+
+function joinAllowed(ip: string): boolean {
   const now = Date.now();
-  if (now > joinResetAt) {
-    joinCount = 0;
-    joinResetAt = now + JOIN_WINDOW_MS;
+  if (now > globalResetAt) {
+    globalCount = 0;
+    globalResetAt = now + GLOBAL_WINDOW_MS;
   }
-  joinCount += 1;
-  return joinCount <= JOIN_MAX;
+  globalCount += 1;
+  if (globalCount > GLOBAL_MAX) return false;
+
+  if (ipHits.size > 10_000) ipHits.clear(); // bound memory under a distributed flood
+  let e = ipHits.get(ip);
+  if (!e || now > e.resetAt) {
+    e = { count: 0, resetAt: now + PER_IP_WINDOW_MS };
+    ipHits.set(ip, e);
+  }
+  e.count += 1;
+  return e.count <= PER_IP_MAX;
 }
 
 // Join with a SINGLE-USE 6-char invite code. The invite is consumed atomically
 // (so it can't be redeemed twice) and its role is granted. A fresh one-time
 // recovery code is returned, shown to the user exactly once.
 authRoutes.post('/join', async (c) => {
-  if (!joinAllowed()) return c.json({ error: 'too many attempts, try again shortly' }, 429);
+  const ip = c.req.header('x-club-client-ip') || 'unknown';
+  if (!joinAllowed(ip)) return c.json({ error: 'too many attempts, try again shortly' }, 429);
   const body = await c.req.json<JoinRequest>().catch(() => null);
   if (!body?.inviteCode || !body.displayName?.trim()) {
     return c.json({ error: 'inviteCode and displayName required' }, 400);
@@ -64,6 +78,9 @@ authRoutes.post('/join', async (c) => {
         .where(and(eq(invites.clubId, club.id), eq(invites.codeHash, codeHash)))
         .limit(1);
       if (!invite || invite.usedAt) return { error: 'invalid or already-used invite', status: 401 as const };
+      if (invite.expiresAt && invite.expiresAt.getTime() < Date.now()) {
+        return { error: 'invite expired', status: 401 as const };
+      }
 
       const [user] = await tx
         .insert(users)
