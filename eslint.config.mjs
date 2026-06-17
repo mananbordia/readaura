@@ -8,6 +8,8 @@ const config = [
       'node_modules/**',
       'data/**',
       'public/**',
+      // The club backend is a separate package with its own toolchain.
+      'server/**',
     ],
   },
   {

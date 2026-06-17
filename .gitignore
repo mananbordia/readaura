@@ -1,6 +1,10 @@
 # dependencies
 /node_modules
 
+# club backend (separate package; deps installed on the Oracle box)
+/server/node_modules
+/server/.env
+
 # next.js
 /.next/
 /out/

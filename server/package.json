@@ -1,0 +1,29 @@
+{
+  "name": "readaura-club-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ReadAura reading-club backend (Hono + Drizzle + Postgres). Self-hosted on Oracle Cloud; never deployed to Vercel.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@node-rs/argon2": "^2.0.2",
+    "drizzle-orm": "^0.38.3",
+    "hono": "^4.6.14",
+    "jose": "^5.9.6",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.30.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5"
+  }
+}
