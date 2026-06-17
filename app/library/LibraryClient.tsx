@@ -4,12 +4,12 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import type { UIMessage } from 'ai';
 import {
   ArrowDownUp, ArrowLeft, ClipboardPaste, FileText, FileType2, Loader2, Minus, PencilLine, Plus,
-  Save, Search, Sparkles, Tags, Trash2, Upload, X, Volume2, Pause, Play, Square, MessageSquare,
+  Save, Search, Sparkles, Tags, Trash2, Upload, X, Volume2, Pause, Play, Square, MessageSquare, Globe,
 } from 'lucide-react';
 import type { Document, FileType, SavedExplanation } from '@/lib/types';
 import {
   listDocuments, createDocument, updateDocument, deleteDocument,
-  getFile, getHtmlOverride, setHtmlOverride,
+  getFile, getHtmlOverride, setHtmlOverride, listClubDocs,
 } from '@/lib/storage';
 import { extractPdfText } from '@/lib/pdf-text';
 import { convertDocxBlobToHtml } from '@/lib/docx-html';
@@ -38,6 +38,14 @@ import { TagInput } from '@/components/tag-input';
 import dynamic from 'next/dynamic';
 import { SettingsDialog } from '@/components/settings-dialog';
 import { useApiKey } from '@/lib/use-api-key';
+import type { ClubLink } from './ClubPanel';
+
+// Club UI is dynamic-imported ONLY when the build-time flag is set, so ALL club
+// code (the panel, the API client, DOMPurify) lives in a chunk that is excluded
+// from the default client bundle. LibraryClient itself keeps NO static club
+// imports. Enforced by scripts/check-flag-off-parity.mjs.
+const CLUB_BUILD = process.env.NEXT_PUBLIC_CLUB_ENABLED === 'true';
+const ClubPanel = CLUB_BUILD ? dynamic(() => import('./ClubPanel'), { ssr: false }) : null;
 
 // PDF.js touches DOMMatrix at module load — defer to client-only.
 const PdfViewer = dynamic(
@@ -123,7 +131,7 @@ type Props = {
   clubEnabled: boolean;
 };
 
-export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) {
+export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabled }: Props) {
   const { hasKey: clientHasKey, hydrated: apiKeyHydrated } = useApiKey();
   // Until we've read localStorage, optimistically assume AI is configured.
   // This avoids the "missing key" banner flashing for users who have saved a
@@ -133,6 +141,9 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [docsLoaded, setDocsLoaded] = useState(false);
+  const [clubPanelOpen, setClubPanelOpen] = useState(false);
+  const [clubLinks, setClubLinks] = useState<ClubLink[]>([]);
+  const [clubRefresh, setClubRefresh] = useState(0);
 
   // Hydrate the library from IndexedDB on mount.
   useEffect(() => {
@@ -687,6 +698,33 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
     setTimeout(() => editButtonRef.current?.focus(), 0);
   };
 
+  // ---- Club link cache ----------------------------------------------------
+  // Keep the local clubDocs link cache fresh (drives the ClubPanel's
+  // open/update/published states). No-op unless the club flag is on.
+  useEffect(() => {
+    if (!clubEnabled) return;
+    let cancelled = false;
+    listClubDocs()
+      .then(rows => {
+        if (!cancelled) {
+          setClubLinks(rows.map(r => ({
+            logicalId: r.logicalId,
+            contentHash: r.cachedContentHash,
+            localDocumentId: r.localDocumentId,
+          })));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [clubEnabled, clubRefresh, clubPanelOpen]);
+
+  // Reload the library list + link cache after a club publish/open/unpublish.
+  // The actual club logic lives in ClubPanel (the flag-gated chunk).
+  const reloadLibrary = useCallback(async () => {
+    setDocuments(await listDocuments());
+    setClubRefresh(k => k + 1);
+  }, []);
+
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!(e.metaKey || e.ctrlKey)) return;
     const k = e.key.toLowerCase();
@@ -1018,9 +1056,16 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
                   {documents.length} document{documents.length === 1 ? '' : 's'}
                 </p>
               </div>
-              <Button onClick={() => setShowUpload(true)}>
-                <Upload className="h-4 w-4" /> Upload
-              </Button>
+              <div className="flex items-center gap-2">
+                {clubEnabled && (
+                  <Button variant="outline" onClick={() => setClubPanelOpen(true)}>
+                    <Globe className="h-4 w-4" /> Club
+                  </Button>
+                )}
+                <Button onClick={() => setShowUpload(true)}>
+                  <Upload className="h-4 w-4" /> Upload
+                </Button>
+              </div>
             </div>
 
             {!aiConfigured && (
@@ -1393,6 +1438,18 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) 
       )}
 
       {/* Welcome dialog */}
+      {clubEnabled && ClubPanel && (
+        <ClubPanel
+          open={clubPanelOpen}
+          onOpenChange={setClubPanelOpen}
+          documents={documents}
+          links={clubLinks}
+          renderDocxHtml={(raw) => processDocxHtml(raw).html}
+          txtToHtml={textToHtml}
+          onChanged={reloadLibrary}
+        />
+      )}
+
       <Dialog open={showWelcome} onOpenChange={open => { if (!open) dismissWelcome(); }}>
         <DialogContent>
           <DialogHeader>
