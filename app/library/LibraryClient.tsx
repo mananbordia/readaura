@@ -117,6 +117,10 @@ function deriveTitleFromText(text: string): string {
 
 type Props = {
   aiConfigured: boolean;
+  // Threaded through for Phase 2+, where the club UI is dynamic-imported behind
+  // this flag. Intentionally unconsumed in Phase 1 so the rendered DOM and
+  // behaviour are byte-for-byte unchanged when the flag is off.
+  clubEnabled: boolean;
 };
 
 export default function LibraryClient({ aiConfigured: serverHasEnvKey }: Props) {
