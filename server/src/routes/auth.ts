@@ -90,7 +90,7 @@ authRoutes.post('/join', async (c) => {
       // Consume atomically: only succeeds if still unused (guards concurrent redeem).
       const consumed = await tx
         .update(invites)
-        .set({ usedAt: new Date(), usedByUserId: user.id })
+        .set({ usedAt: new Date(), usedByUserId: user.id, code: null }) // clear plaintext once used
         .where(and(eq(invites.id, invite.id), isNull(invites.usedAt)))
         .returning();
       if (consumed.length === 0) throw new Error('invite-race'); // rolls back the user insert

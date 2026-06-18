@@ -22,6 +22,7 @@ type DocRow = {
   snapshotFormatVersion: number;
   publishedAt: Date;
   updatedAt: Date;
+  publisherId: string;
   publisherName: string;
 };
 
@@ -33,6 +34,7 @@ function toDTO(r: DocRow): PublishedDocDTO {
     tags: r.tags ?? [],
     fileType: r.fileType as ClubFileType,
     snapshotFormatVersion: r.snapshotFormatVersion,
+    publisherId: r.publisherId,
     publisherName: r.publisherName,
     publishedAt: r.publishedAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
@@ -48,6 +50,7 @@ const discoverColumns = {
   snapshotFormatVersion: publishedDocs.snapshotFormatVersion,
   publishedAt: publishedDocs.publishedAt,
   updatedAt: publishedDocs.updatedAt,
+  publisherId: publishedDocs.publisherId,
   publisherName: users.displayName,
 };
 

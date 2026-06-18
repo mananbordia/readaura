@@ -49,6 +49,7 @@ export type PublishedDocDTO = {
   tags: string[];
   fileType: ClubFileType;
   snapshotFormatVersion: number;
+  publisherId: string;
   publisherName: string;
   publishedAt: string;
   updatedAt: string;
@@ -91,6 +92,21 @@ export type RecoverResponse = JoinResponse;
 export type CreateInviteRequest = { label?: string; role?: MemberRole };
 export type CreateInviteResponse = { code: string; role: MemberRole; label: string | null };
 
+// Owner-only Members-tab views.
+export type InviteDTO = {
+  id: string;
+  code: string;
+  role: MemberRole;
+  expiresAt: string | null;
+  createdAt: string;
+};
+export type MemberDTO = {
+  userId: string;
+  displayName: string;
+  role: MemberRole;
+  joinedAt: string;
+};
+
 // ---- Publish / discover --------------------------------------------------
 
 export type PublishRequest = {
@@ -103,6 +119,20 @@ export type PublishRequest = {
   /** DOCX/TXT carry their rendered snapshot HTML inline; PDFs upload bytes in a
    *  separate content-addressed step keyed by `contentHash`. */
   snapshotHtml?: string;
+};
+
+// ---- Shared annotations (Phase 3) ----------------------------------------
+// A member's explanation/highlight shared with the club, anchored to a doc by
+// logicalId. Upserted by (authorId, clientId) so re-pushing the same local note
+// updates its server row rather than duplicating.
+export type ShareAnnotationRequest = {
+  logicalId: string;
+  kind: SharedAnnotationKind;
+  anchor: TextQuoteAnchor;
+  selectedText: string;
+  payload: SharedAnnotationPayload;
+  /** The author's local IndexedDB id (the SavedExplanation id) — the upsert key. */
+  clientId: string;
 };
 
 // ---- Personal sync (a SEPARATE lane from clubs; opt-in; default off) ------

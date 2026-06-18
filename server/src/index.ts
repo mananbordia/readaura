@@ -6,6 +6,8 @@ import { ensureSeed } from './seed';
 import { authRoutes } from './routes/auth';
 import { blobsRoutes, docsRoutes } from './routes/docs';
 import { invitesRoutes } from './routes/invites';
+import { membersRoutes } from './routes/members';
+import { annotationsRoutes } from './routes/annotations';
 
 const app = new Hono();
 
@@ -29,8 +31,16 @@ app.use('/invites', proxyGuard);
 app.use('/invites/*', proxyGuard);
 app.route('/invites', invitesRoutes);
 
-// Phase 3 mounts /annotations; the personal-sync track mounts /sync — each
-// behind its own proxyGuard.
+app.use('/members', proxyGuard);
+app.use('/members/*', proxyGuard);
+app.route('/members', membersRoutes);
+
+// Phase 3: shared annotations (explanations auto-shared onto club docs).
+app.use('/annotations', proxyGuard);
+app.use('/annotations/*', proxyGuard);
+app.route('/annotations', annotationsRoutes);
+
+// The personal-sync track mounts /sync later, behind its own proxyGuard.
 
 await ensureSeed();
 

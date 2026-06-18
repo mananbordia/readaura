@@ -54,6 +54,10 @@ export const invites = pgTable('invites', {
   id: uuid('id').primaryKey().defaultRandom(),
   clubId: uuid('club_id').notNull().references(() => clubs.id, { onDelete: 'cascade' }),
   codeHash: text('code_hash').notNull().unique(),
+  // Plaintext code, retained ONLY while the invite is active so the owner can
+  // see/re-share pending invites; cleared (NULL) when consumed on join, so a DB
+  // leak never exposes a used code. Lookup on join still goes via codeHash.
+  code: text('code'),
   role: text('role').notNull().default('member'),
   label: text('label'),
   createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
