@@ -1,18 +1,21 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import type { UIMessage } from 'ai';
 import {
   ArrowDownUp, ArrowLeft, ClipboardPaste, FileText, FileType2, Loader2, Minus, PencilLine, Plus,
-  Save, Search, Sparkles, Tags, Trash2, Upload, X, Volume2, Pause, Play, Square, MessageSquare,
+  Save, Search, Sparkles, Tags, Trash2, Upload, X, Volume2, Pause, Play, Square, MessageSquare, Users,
 } from 'lucide-react';
 import type { Document, FileType, SavedExplanation } from '@/lib/types';
 import {
   listDocuments, createDocument, updateDocument, deleteDocument,
-  getFile, getHtmlOverride, setHtmlOverride,
+  getFile, getHtmlOverride, setHtmlOverride, getClubDocByLocalId, listClubDocs,
 } from '@/lib/storage';
 import { extractPdfText } from '@/lib/pdf-text';
 import { convertDocxBlobToHtml } from '@/lib/docx-html';
+import { textToHtml } from '@/lib/reader-html';
+import type { SharedExp } from '@/lib/club/share';
 import ExplainPopover from './ExplainPopover';
 import SavedExplanationsDrawer from './SavedExplanationsDrawer';
 import { EditorToolbar } from '@/components/editor-toolbar';
@@ -86,18 +89,6 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function escapeHtml(s: string) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function textToHtml(text: string): string {
-  return text
-    .split(/\n\s*\n/)
-    .filter(p => p.trim())
-    .map(p => `<p>${escapeHtml(p).replace(/\n/g, '<br/>')}</p>`)
-    .join('');
-}
-
 // Accepted upload formats. Markdown is stored as plain text (fileType 'txt').
 const UPLOAD_ACCEPT = '.pdf,.docx,.txt,.md';
 const ACCEPTED_EXTS = ['pdf', 'docx', 'txt', 'md'];
@@ -155,6 +146,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     return () => { cancelled = true; };
   }, []);
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
+  const router = useRouter();
   const [error, setError] = useState('');
   const [docxHtml, setDocxHtml] = useState('');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
@@ -224,6 +216,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     text: string;
     contextBefore: string;
     contextAfter: string;
+    blockTtsIndex: number | null;
     rect: { top: number; left: number; width: number };
   };
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo | null>(null);
@@ -231,6 +224,20 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
   const [explainOpen, setExplainOpen] = useState(false);
   const [continueFromThread, setContinueFromThread] = useState<SavedExplanation | null>(null);
   const [explanationsRefreshKey, setExplanationsRefreshKey] = useState(0);
+
+  // Shared explanations (club docs): fetched from the backend, rendered both in
+  // the panel and as right-margin bubbles anchored by block index.
+  const [sharedExps, setSharedExps] = useState<SharedExp[]>([]);
+  const [sharedBubbles, setSharedBubbles] = useState<{ blockIndex: number; top: number; exps: SharedExp[] }[]>([]);
+  const [viewingShared, setViewingShared] = useState<SharedExp[] | null>(null);
+  // Local cache ids of club docs opened from OTHERS — kept for speed but hidden
+  // from the Library list and opened read-only. Own published docs stay visible.
+  const [hiddenClubIds, setHiddenClubIds] = useState<Set<string>>(new Set());
+  // The open doc's club link, if any (null = not a club doc).
+  const [selectedClubLink, setSelectedClubLink] = useState<{ mine: boolean } | null>(null);
+  // Bumped when the open doc's content changes (edit saved), so the club button
+  // re-checks whether local now differs from the published version.
+  const [editVersion, setEditVersion] = useState(0);
 
   useEffect(() => {
     const viewer = docxViewerRef.current;
@@ -263,8 +270,16 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
         const contextBefore = idx >= 0 ? fullText.slice(Math.max(0, idx - 500), idx) : '';
         const contextAfter = idx >= 0 ? fullText.slice(idx + text.length, idx + text.length + 500) : '';
 
+        // The block the selection starts in — its data-tts-index anchors a
+        // shared explanation's margin bubble (stable across club members).
+        const anchorNode = selection.anchorNode;
+        const anchorEl = anchorNode instanceof Element ? anchorNode : anchorNode?.parentElement ?? null;
+        const block = anchorEl?.closest('[data-tts-index]') as HTMLElement | null;
+        const blockTtsIndex = block ? parseInt(block.getAttribute('data-tts-index') || '', 10) : null;
+
         setSelectionInfo({
           text, contextBefore, contextAfter,
+          blockTtsIndex: Number.isNaN(blockTtsIndex) ? null : blockTtsIndex,
           rect: { top: rect.top, left: rect.left, width: rect.width },
         });
       }, 0);
@@ -307,9 +322,105 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     setSelectionInfo(null);
   };
 
-  const handleExplanationSaved = () => {
-    setExplanationsRefreshKey(k => k + 1);
+  const handleExplanationSaved = (exp: SavedExplanation, opts?: { share?: boolean }) => {
+    setExplanationsRefreshKey(k => k + 1); // refresh the local list immediately
+    // Share to the club only when the user chose "Save to club" (opt-in). Club
+    // code is dynamically imported so it never ships in the flag-off build.
+    if (opts?.share && CLUB_BUILD && selectedDocument) {
+      const docId = selectedDocument.id;
+      (async () => {
+        try {
+          const { pushShared } = await import('@/lib/club/share');
+          await pushShared(docId, exp);
+          setExplanationsRefreshKey(k => k + 1); // re-pull shared once it lands
+        } catch { /* sharing is best-effort */ }
+      })();
+    }
   };
+
+  // Cached copies of OTHERS' club docs are hidden from the Library list (read
+  // them from the club instead). Own published docs (mine) stay visible.
+  useEffect(() => {
+    if (!CLUB_BUILD || !docsLoaded) { setHiddenClubIds(new Set()); return; }
+    let cancelled = false;
+    listClubDocs().then(links => {
+      if (cancelled) return;
+      setHiddenClubIds(new Set(
+        links.filter(l => l.mine !== true && l.localDocumentId).map(l => l.localDocumentId as string),
+      ));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [docsLoaded, documents]);
+
+  // The open doc's club link (whether it's a club doc, and whether it's mine).
+  useEffect(() => {
+    if (!CLUB_BUILD || !selectedDocument) { setSelectedClubLink(null); return; }
+    let cancelled = false;
+    getClubDocByLocalId(selectedDocument.id).then(link => {
+      if (!cancelled) setSelectedClubLink(link ? { mine: link.mine === true } : null);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDocument?.id]);
+
+  // Deleting a local explanation also unshares it from the club (best-effort).
+  const handleExplanationDeleted = (id: string) => {
+    setExplanationsRefreshKey(k => k + 1);
+    if (CLUB_BUILD) {
+      (async () => {
+        try {
+          const { removeShared } = await import('@/lib/club/share');
+          await removeShared(id);
+          setExplanationsRefreshKey(k => k + 1);
+        } catch { /* best-effort */ }
+      })();
+    }
+  };
+
+  // Pull shared explanations whenever the open doc changes or an explanation is
+  // saved. Returns [] for non-club docs. The club layer is dynamically imported
+  // behind CLUB_BUILD so it's dead-code-eliminated from the flag-off build.
+  useEffect(() => {
+    if (!selectedDocument) { setSharedExps([]); return; }
+    let cancelled = false;
+    if (CLUB_BUILD) {
+      const docId = selectedDocument.id;
+      (async () => {
+        try {
+          const { pullShared } = await import('@/lib/club/share');
+          const list = await pullShared(docId);
+          if (!cancelled) setSharedExps(list);
+        } catch { if (!cancelled) setSharedExps([]); }
+      })();
+    } else {
+      setSharedExps([]);
+    }
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDocument?.id, explanationsRefreshKey]);
+
+  // Position a right-margin bubble next to each block that has shared
+  // explanations (docx/txt only; PDFs show them in the panel). Recomputed when
+  // the content or shared set changes.
+  useEffect(() => {
+    const viewer = docxViewerRef.current;
+    if (!viewer || editing || !selectedDocument || selectedDocument.fileType === 'pdf') {
+      setSharedBubbles([]);
+      return;
+    }
+    const byBlock = new Map<number, SharedExp[]>();
+    for (const e of sharedExps) {
+      if (e.blockIndex == null) continue;
+      byBlock.set(e.blockIndex, [...(byBlock.get(e.blockIndex) ?? []), e]);
+    }
+    const next: { blockIndex: number; top: number; exps: SharedExp[] }[] = [];
+    byBlock.forEach((exps, idx) => {
+      const el = viewer.querySelector(`[data-tts-index="${idx}"]`);
+      if (el instanceof HTMLElement) next.push({ blockIndex: idx, top: el.offsetTop, exps });
+    });
+    setSharedBubbles(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedExps, docxHtml, editing, selectedDocument?.id, selectedDocument?.fileType]);
 
   const continueInitialMessages: UIMessage[] | undefined = continueFromThread
     ? continueFromThread.messages.map((m): UIMessage => ({
@@ -479,6 +590,36 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     setTtsProgress({ current: 0, total: 0 });
   };
 
+  // Keep the open doc in the URL (/library?doc=<id>) so the viewer survives a
+  // refresh and is a shareable link. Uses history.replaceState rather than the
+  // Next router so it doesn't remount this client component (which would drop
+  // the viewer/TTS state); the deep-link effect below re-opens it on load.
+  // Hoisted above handleDelete/handleView (which call it) to avoid a
+  // use-before-declare lint error, same as stopTts above.
+  const syncDocUrl = useCallback((docId: string | null) => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (docId) url.searchParams.set('doc', docId);
+    else url.searchParams.delete('doc');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
+  // Close the viewer. A doc opened from the club (?from=club) returns to /club
+  // where the user came from; a doc opened from the library returns to the list.
+  const handleBack = () => {
+    stopTts();
+    setEditing(false);
+    const fromClub = typeof window !== 'undefined'
+      && new URLSearchParams(window.location.search).get('from') === 'club';
+    if (fromClub) {
+      router.push('/club');
+      return;
+    }
+    setSelectedDocument(null);
+    setDocxHtml('');
+    syncDocUrl(null);
+  };
+
   const handleDelete = async (documentId: string) => {
     await deleteDocument(documentId);
     setDocuments(prev => prev.filter(r => r.id !== documentId));
@@ -487,6 +628,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
       setSelectedDocument(null);
       setDocxHtml('');
       stopTts();
+      syncDocUrl(null);
     }
   };
 
@@ -603,6 +745,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
   const handleView = async (doc: Document) => {
     stopTts();
     setSelectedDocument(doc);
+    syncDocUrl(doc.id);
     setDocxHtml('');
     ttsItemsRef.current = [];
     // Revoke any previously-created PDF object URL before we make a new one.
@@ -640,8 +783,6 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
         const override = await getHtmlOverride(doc.id);
         const rawHtml = override ?? textToHtml(await blob.text());
         const { html, items } = processDocxHtml(rawHtml);
-        // Fall back to an empty paragraph so a blank file stays viewable /
-        // editable rather than getting stuck on the loading spinner.
         setDocxHtml(html || '<p></p>');
         ttsItemsRef.current = items;
       } catch {
@@ -699,6 +840,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
       const { html, items } = processDocxHtml(editedHtml);
       setDocxHtml(html);
       ttsItemsRef.current = items;
+      setEditVersion(v => v + 1); // content changed → let the club button re-check
       setEditing(false);
       setTimeout(() => editButtonRef.current?.focus(), 0);
     } catch {
@@ -951,8 +1093,14 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
   }, []);
 
   // Filtered + sorted documents
+  // Hide cached copies of others' club docs from the Library entirely.
+  const visibleDocuments = useMemo(
+    () => documents.filter(d => !hiddenClubIds.has(d.id)),
+    [documents, hiddenClubIds],
+  );
+
   const filtered = useMemo(() => {
-    let arr = documents;
+    let arr = visibleDocuments;
     if (tagFilter) arr = arr.filter(d => d.tags.includes(tagFilter));
     const q = search.trim().toLowerCase();
     if (q) {
@@ -978,7 +1126,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
         sorted.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
     return sorted;
-  }, [documents, tagFilter, search, sortMode]);
+  }, [visibleDocuments, tagFilter, search, sortMode]);
 
   const toggleBulkAll = () => {
     if (bulkSelected.size === filtered.length) setBulkSelected(new Set());
@@ -992,7 +1140,12 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     });
   };
 
-  const libraryIsEmpty = docsLoaded && documents.length === 0;
+  const libraryIsEmpty = docsLoaded && visibleDocuments.length === 0;
+
+  // A club doc opened from someone else is read-only (no edit). Any club-linked
+  // doc can have its explanations saved to the club.
+  const isForeignClubDoc = selectedClubLink?.mine === false;
+  const canShareToClub = selectedClubLink != null;
 
   // Upload-dialog title hints. The title is always optional; the placeholder
   // and helper text make the fallback (file name / first line) explicit.
@@ -1038,7 +1191,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
               <div>
                 <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
                 <p className="text-sm text-muted-foreground">
-                  {documents.length} document{documents.length === 1 ? '' : 's'}
+                  {visibleDocuments.length} document{visibleDocuments.length === 1 ? '' : 's'}
                 </p>
               </div>
               <Button onClick={() => setShowUpload(true)}>
@@ -1192,7 +1345,8 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                     {filtered.map(r => (
                       <tr
                         key={r.id}
-                        className="border-t border-border transition-colors hover:bg-muted/30"
+                        className={`border-t border-border transition-colors hover:bg-muted/30 ${editingId === r.id ? '' : 'cursor-pointer'}`}
+                        onClick={editingId === r.id ? undefined : () => handleView(r)}
                       >
                         {editingId === r.id ? (
                           <td colSpan={7} className="p-3">
@@ -1216,18 +1370,14 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                           </td>
                         ) : (
                           <>
-                            <td className="p-2 sm:p-3">
+                            <td className="p-2 sm:p-3" onClick={e => e.stopPropagation()}>
                               <Checkbox
                                 checked={bulkSelected.has(r.id)}
                                 onCheckedChange={() => toggleBulkOne(r.id)}
-                                onClick={e => e.stopPropagation()}
                                 aria-label={`Select ${r.title}`}
                               />
                             </td>
-                            <td
-                              className="cursor-pointer p-2 font-medium sm:p-3"
-                              onClick={() => handleView(r)}
-                            >
+                            <td className="p-2 font-medium sm:p-3">
                               <div className="flex min-w-0 items-center gap-2">
                                 {r.fileType === 'pdf' ? <FileType2 className="h-4 w-4 shrink-0 text-muted-foreground" /> : <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />}
                                 <span className="truncate">{r.title}</span>
@@ -1249,9 +1399,8 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                             <td className="hidden p-3 text-muted-foreground lg:table-cell">
                               {formatFileSize(r.fileSize)}
                             </td>
-                            <td className="p-2 text-right sm:p-3">
+                            <td className="p-2 text-right sm:p-3" onClick={e => e.stopPropagation()}>
                               <div className="flex justify-end gap-0.5 sm:gap-1">
-                                <Button size="sm" variant="ghost" onClick={() => handleView(r)} className="hidden sm:inline-flex">Open</Button>
                                 <Button size="icon-sm" variant="ghost" onClick={() => startEdit(r)} aria-label="Edit">
                                   <PencilLine className="h-3.5 w-3.5" />
                                 </Button>
@@ -1277,7 +1426,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => { setSelectedDocument(null); setDocxHtml(''); stopTts(); setEditing(false); }}
+                  onClick={handleBack}
                 >
                   <ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">Back</span>
                 </Button>
@@ -1285,12 +1434,12 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {clubEnabled && PublishToClubButton && (
-                  <PublishToClubButton doc={selectedDocument} snapshotHtml={docxHtml} />
+                  <PublishToClubButton doc={selectedDocument} contentVersion={editVersion} />
                 )}
                 <Button variant="outline" size="sm" onClick={() => setDrawerOpen(true)}>
                   <MessageSquare className="h-4 w-4" /> <span className="hidden sm:inline">Explanations</span>
                 </Button>
-                {selectedDocument.fileType !== 'pdf' && (
+                {selectedDocument.fileType !== 'pdf' && !isForeignClubDoc && (
                   <Button ref={editButtonRef} size="sm" variant={editing ? 'default' : 'outline'} onClick={handleToggleEdit} disabled={editorSaving}>
                     {editorSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : editing ? <Save className="h-3.5 w-3.5" /> : <PencilLine className="h-3.5 w-3.5" />}
                     <span className="hidden sm:inline">{editing ? 'Save' : 'Edit'}</span>
@@ -1377,19 +1526,36 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
               (docxHtml || editing) ? (
                 <div className="space-y-2">
                   {editing && <EditorToolbar exec={execEditorCommand} />}
-                  <div
-                    ref={docxViewerRef}
-                    className={cn(
-                      'reader-prose max-h-[80vh] overflow-y-auto rounded-lg border border-border bg-card p-4 sm:p-6 md:p-10',
-                      ttsActive && 'tts-active',
-                      editing && 'outline outline-1 outline-dashed outline-primary focus:outline-2',
-                    )}
-                    contentEditable={editing}
-                    suppressContentEditableWarning
-                    onKeyDown={editing ? handleEditorKeyDown : undefined}
-                    onClick={editing ? undefined : handleDocxClick}
-                    dangerouslySetInnerHTML={{ __html: docxHtml }}
-                  />
+                  <div className="relative max-h-[80vh] overflow-y-auto rounded-lg border border-border bg-card">
+                    <div
+                      ref={docxViewerRef}
+                      className={cn(
+                        'reader-prose p-4 sm:p-6 md:p-10',
+                        ttsActive && 'tts-active',
+                        editing && 'outline outline-1 outline-dashed outline-primary focus:outline-2',
+                      )}
+                      contentEditable={editing}
+                      suppressContentEditableWarning
+                      onKeyDown={editing ? handleEditorKeyDown : undefined}
+                      onClick={editing ? undefined : handleDocxClick}
+                      dangerouslySetInnerHTML={{ __html: docxHtml }}
+                    />
+                    {/* Shared-explanation margin bubbles (club docs), anchored to
+                        each block by data-tts-index; scroll with the content. */}
+                    {sharedBubbles.map(b => (
+                      <button
+                        key={b.blockIndex}
+                        type="button"
+                        onClick={() => setViewingShared(b.exps)}
+                        style={{ top: b.top + 2 }}
+                        title={`${b.exps.length} shared explanation${b.exps.length > 1 ? 's' : ''}`}
+                        className="absolute right-1.5 inline-flex h-6 min-w-[1.5rem] items-center justify-center gap-0.5 rounded-full border border-border bg-card px-1.5 text-[11px] font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        <MessageSquare className="h-3 w-3 text-primary" />
+                        {b.exps.length > 1 ? b.exps.length : ''}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <div className="flex items-center justify-center rounded-lg border border-border bg-card p-12 text-sm text-muted-foreground">
@@ -1578,8 +1744,40 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
           open={drawerOpen}
           onOpenChange={setDrawerOpen}
           onContinue={handleContinueExplanation}
+          shared={sharedExps}
+          onDeleted={handleExplanationDeleted}
         />
       )}
+
+      {/* Read-only view of the shared explanations at a clicked margin bubble */}
+      <Dialog open={!!viewingShared} onOpenChange={o => { if (!o) setViewingShared(null); }}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Users className="h-4 w-4 text-primary" /> Shared by the club</DialogTitle>
+            <DialogDescription>Explanations other members shared on this passage.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {viewingShared?.map(s => (
+              <div key={s.id} className="overflow-hidden rounded-md border border-border">
+                <div className="border-b border-border bg-muted/30 px-3 py-2 text-xs">
+                  <span className="italic text-muted-foreground">&ldquo;{s.selectedText.length > 160 ? s.selectedText.slice(0, 160) + '…' : s.selectedText}&rdquo;</span>
+                  <span className="ml-1.5 font-medium">— {s.authorName}</span>
+                </div>
+                <div className="space-y-3 p-3 text-sm">
+                  {s.messages.map((m, i) => (
+                    <div key={i}>
+                      <div className={`mb-0.5 text-xs font-semibold uppercase tracking-wide ${m.role === 'assistant' ? 'text-primary' : 'text-muted-foreground'}`}>
+                        {m.role === 'assistant' ? 'Aura' : s.authorName}
+                      </div>
+                      <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Explanation popover */}
       {explainOpen && selectedDocument && (continueFromThread || activeSelection) && (
@@ -1589,6 +1787,8 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
           selectedText={continueFromThread?.selectedText ?? activeSelection!.text}
           contextBefore={continueFromThread?.contextBefore ?? activeSelection!.contextBefore}
           contextAfter={continueFromThread?.contextAfter ?? activeSelection!.contextAfter}
+          blockIndex={continueFromThread ? (continueFromThread.blockIndex ?? null) : (activeSelection?.blockTtsIndex ?? null)}
+          canShareToClub={canShareToClub}
           initialMessages={continueInitialMessages}
           initialExplanationId={continueFromThread?.id ?? null}
           onClose={handleCloseExplain}

@@ -41,11 +41,19 @@ export async function publishLocalDoc(opts: {
 }): Promise<void> {
   const { session, doc, snapshotHtml } = opts;
   const existing = await getClubDocByLocalId(doc.id);
-  // No forking: a doc opened from the club stays a read-only local copy.
-  if (existing && !existing.mine) {
-    throw new Error('This document was opened from the club — it stays a local copy.');
+  // No forking: a doc opened from the club stays a read-only local copy — but
+  // only while that publication is still live. Once it's unpublished/wiped
+  // server-side it's just an orphaned local doc, so the user may publish it as
+  // their own (we mint a fresh logicalId so it doesn't inherit the old one).
+  let reuseLogicalId = false;
+  if (existing) {
+    if (existing.mine) {
+      reuseLogicalId = true;
+    } else if (await clubApi.exists(session.token, existing.logicalId)) {
+      throw new Error('This document was opened from the club — it stays a local copy.');
+    }
   }
-  const logicalId = existing ? existing.logicalId : newId();
+  const logicalId = reuseLogicalId && existing ? existing.logicalId : newId();
 
   let contentHash: string;
   if (doc.fileType === 'pdf') {
@@ -110,12 +118,18 @@ export async function openClubDoc(opts: { session: ClubSession; dto: PublishedDo
     }
   }
 
+  // If the current user is the doc's publisher (e.g. they cleared their browser
+  // and pulled their own doc back after recovering), keep the link as theirs so
+  // they can still update it — otherwise it's a read-only copy of another
+  // member's doc (no forking). Preserve an existing `mine` if already set.
+  const mine = dto.publisherId === session.userId || existingLink?.mine === true;
+
   await putClubDoc({
     id: existingLink?.id ?? newId(),
     logicalId: dto.logicalId, contentHash: dto.contentHash, cachedContentHash: dto.contentHash,
     clubId: '', title: dto.title, tags: dto.tags, fileType: dto.fileType,
     publishedByName: dto.publisherName, publishedAt: dto.publishedAt,
-    snapshotFormatVersion: dto.snapshotFormatVersion, localDocumentId: localId, mine: false,
+    snapshotFormatVersion: dto.snapshotFormatVersion, localDocumentId: localId, mine,
   });
   return localId;
 }

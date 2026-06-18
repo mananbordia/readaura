@@ -4,10 +4,14 @@
 
 import type {
   CreateInviteResponse,
+  InviteDTO,
   JoinResponse,
+  MemberDTO,
   PublishRequest,
   PublishedDocDTO,
   RecoverResponse,
+  ShareAnnotationRequest,
+  SharedAnnotationDTO,
 } from '@/shared/club-types';
 import { writeClubSession } from '@/lib/use-club';
 
@@ -50,15 +54,27 @@ export const clubApi = {
       body: JSON.stringify({ recoveryCode }),
     }).then((r) => jsonOrThrow<RecoverResponse>(r)),
 
-  createInvite: (token: string, label?: string) =>
+  createInvite: (token: string) =>
     fetch(`${BASE}/invites`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...auth(token) },
-      body: JSON.stringify({ label }),
+      body: JSON.stringify({}),
     }).then((r) => jsonOrThrow<CreateInviteResponse>(r)),
+
+  listInvites: (token: string) =>
+    fetch(`${BASE}/invites`, { headers: auth(token) }).then((r) => jsonOrThrow<InviteDTO[]>(r)),
+
+  listMembers: (token: string) =>
+    fetch(`${BASE}/members`, { headers: auth(token) }).then((r) => jsonOrThrow<MemberDTO[]>(r)),
 
   discover: (token: string) =>
     fetch(`${BASE}/docs`, { headers: auth(token) }).then((r) => jsonOrThrow<PublishedDocDTO[]>(r)),
+
+  // Is this logicalId still a live publication? (404 once unpublished/wiped.)
+  // Used to decide whether an opened-from-club local copy is still a fork
+  // target, or just an orphaned local doc the user may now publish themselves.
+  exists: (token: string, logicalId: string) =>
+    fetch(`${BASE}/docs/${encodeURIComponent(logicalId)}`, { headers: auth(token) }).then((r) => r.ok),
 
   publish: (token: string, body: PublishRequest) =>
     fetch(`${BASE}/docs/publish`, {
@@ -95,4 +111,23 @@ export const clubApi = {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.text();
     }),
+
+  // ---- Shared annotations (Phase 3) ----
+  shareAnnotation: (token: string, body: ShareAnnotationRequest) =>
+    fetch(`${BASE}/annotations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...auth(token) },
+      body: JSON.stringify(body),
+    }).then((r) => jsonOrThrow<SharedAnnotationDTO>(r)),
+
+  listAnnotations: (token: string, logicalId: string) =>
+    fetch(`${BASE}/annotations?logicalId=${encodeURIComponent(logicalId)}`, { headers: auth(token) })
+      .then((r) => jsonOrThrow<SharedAnnotationDTO[]>(r)),
+
+  deleteAnnotation: (token: string, clientId: string) =>
+    fetch(`${BASE}/annotations/delete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...auth(token) },
+      body: JSON.stringify({ clientId }),
+    }).then((r) => jsonOrThrow<{ ok: boolean }>(r)),
 };

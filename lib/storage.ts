@@ -225,6 +225,7 @@ export async function createExplanation(args: {
   selectedText: string;
   contextBefore: string;
   contextAfter: string;
+  blockIndex?: number | null;
   messages: { role: 'user' | 'assistant'; content: string }[];
 }): Promise<SavedExplanation> {
   const now = new Date().toISOString();
@@ -234,6 +235,7 @@ export async function createExplanation(args: {
     selectedText: args.selectedText,
     contextBefore: args.contextBefore,
     contextAfter: args.contextAfter,
+    blockIndex: args.blockIndex ?? null,
     createdAt: now,
     updatedAt: now,
     messages: args.messages.map((m, i) => ({
