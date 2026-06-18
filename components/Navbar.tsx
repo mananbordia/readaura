@@ -30,6 +30,14 @@ export default function Navbar() {
             >
               Library
             </Link>
+            {process.env.NEXT_PUBLIC_CLUB_ENABLED === 'true' && (
+              <Link
+                href="/club"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Club
+              </Link>
+            )}
           </div>
           <div className="flex items-center gap-1">
             <Button

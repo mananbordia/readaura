@@ -63,6 +63,9 @@ export type ClubDoc = {
   snapshotFormatVersion: number;
   /** The `documents` store id once this snapshot is imported, else null. */
   localDocumentId: string | null;
+  /** True if THIS user published it (can update); false if opened from someone
+   *  else (publishing again forks to a new logicalId). */
+  mine?: boolean;
 };
 
 /** Read-only local cache of shared annotations merged from the backend. */

@@ -4,12 +4,12 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import type { UIMessage } from 'ai';
 import {
   ArrowDownUp, ArrowLeft, ClipboardPaste, FileText, FileType2, Loader2, Minus, PencilLine, Plus,
-  Save, Search, Sparkles, Tags, Trash2, Upload, X, Volume2, Pause, Play, Square, MessageSquare, Globe,
+  Save, Search, Sparkles, Tags, Trash2, Upload, X, Volume2, Pause, Play, Square, MessageSquare,
 } from 'lucide-react';
 import type { Document, FileType, SavedExplanation } from '@/lib/types';
 import {
   listDocuments, createDocument, updateDocument, deleteDocument,
-  getFile, getHtmlOverride, setHtmlOverride, listClubDocs,
+  getFile, getHtmlOverride, setHtmlOverride,
 } from '@/lib/storage';
 import { extractPdfText } from '@/lib/pdf-text';
 import { convertDocxBlobToHtml } from '@/lib/docx-html';
@@ -38,14 +38,15 @@ import { TagInput } from '@/components/tag-input';
 import dynamic from 'next/dynamic';
 import { SettingsDialog } from '@/components/settings-dialog';
 import { useApiKey } from '@/lib/use-api-key';
-import type { ClubLink } from './ClubPanel';
-
-// Club UI is dynamic-imported ONLY when the build-time flag is set, so ALL club
-// code (the panel, the API client, DOMPurify) lives in a chunk that is excluded
-// from the default client bundle. LibraryClient itself keeps NO static club
-// imports. Enforced by scripts/check-flag-off-parity.mjs.
+// The in-viewer "Publish to club" button is dynamic-imported ONLY when the
+// build-time flag is set, so all club code (its actions, the API client,
+// DOMPurify) stays in a club chunk excluded from the default client bundle.
+// LibraryClient itself keeps NO static club imports. Enforced by
+// scripts/check-flag-off-parity.mjs.
 const CLUB_BUILD = process.env.NEXT_PUBLIC_CLUB_ENABLED === 'true';
-const ClubPanel = CLUB_BUILD ? dynamic(() => import('./ClubPanel'), { ssr: false }) : null;
+const PublishToClubButton = CLUB_BUILD
+  ? dynamic(() => import('./PublishToClubButton'), { ssr: false })
+  : null;
 
 // PDF.js touches DOMMatrix at module load — defer to client-only.
 const PdfViewer = dynamic(
@@ -141,9 +142,6 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [docsLoaded, setDocsLoaded] = useState(false);
-  const [clubPanelOpen, setClubPanelOpen] = useState(false);
-  const [clubLinks, setClubLinks] = useState<ClubLink[]>([]);
-  const [clubRefresh, setClubRefresh] = useState(0);
 
   // Hydrate the library from IndexedDB on mount.
   useEffect(() => {
@@ -461,6 +459,26 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     onPickFiles(e.dataTransfer.files);
   };
 
+  // Declared before its first use (handleDelete/handleView) so the deep-link
+  // effect can safely capture handleView without a use-before-declare error.
+  const stopTts = () => {
+    setTtsHighlightIndex(-1);
+    ttsCancelledRef.current = true;
+    ttsGenRef.current++;
+    if (audioRef.current) {
+      audioRef.current.onended = null;
+      audioRef.current.onerror = null;
+      audioRef.current.pause();
+      audioRef.current.removeAttribute('src');
+      audioRef.current.load();
+    }
+    setTtsActive(false);
+    setTtsPaused(false);
+    setTtsLoading(false);
+    setTtsPauseReason(null);
+    setTtsProgress({ current: 0, total: 0 });
+  };
+
   const handleDelete = async (documentId: string) => {
     await deleteDocument(documentId);
     setDocuments(prev => prev.filter(r => r.id !== documentId));
@@ -698,32 +716,16 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     setTimeout(() => editButtonRef.current?.focus(), 0);
   };
 
-  // ---- Club link cache ----------------------------------------------------
-  // Keep the local clubDocs link cache fresh (drives the ClubPanel's
-  // open/update/published states). No-op unless the club flag is on.
+  // Deep-link: /library?doc=<id> opens that doc directly (e.g. after opening a
+  // club doc from the /club page). Runs once after the library hydrates.
   useEffect(() => {
-    if (!clubEnabled) return;
-    let cancelled = false;
-    listClubDocs()
-      .then(rows => {
-        if (!cancelled) {
-          setClubLinks(rows.map(r => ({
-            logicalId: r.logicalId,
-            contentHash: r.cachedContentHash,
-            localDocumentId: r.localDocumentId,
-          })));
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [clubEnabled, clubRefresh, clubPanelOpen]);
-
-  // Reload the library list + link cache after a club publish/open/unpublish.
-  // The actual club logic lives in ClubPanel (the flag-gated chunk).
-  const reloadLibrary = useCallback(async () => {
-    setDocuments(await listDocuments());
-    setClubRefresh(k => k + 1);
-  }, []);
+    if (!docsLoaded || typeof window === 'undefined') return;
+    const docId = new URLSearchParams(window.location.search).get('doc');
+    if (!docId) return;
+    const target = documents.find(d => d.id === docId);
+    if (target) handleView(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docsLoaded]);
 
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!(e.metaKey || e.ctrlKey)) return;
@@ -823,23 +825,6 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     };
   });
 
-  const stopTts = () => {
-    setTtsHighlightIndex(-1);
-    ttsCancelledRef.current = true;
-    ttsGenRef.current++;
-    if (audioRef.current) {
-      audioRef.current.onended = null;
-      audioRef.current.onerror = null;
-      audioRef.current.pause();
-      audioRef.current.removeAttribute('src');
-      audioRef.current.load();
-    }
-    setTtsActive(false);
-    setTtsPaused(false);
-    setTtsLoading(false);
-    setTtsPauseReason(null);
-    setTtsProgress({ current: 0, total: 0 });
-  };
 
   const handleReadAloud = async () => {
     if (!selectedDocument) return;
@@ -1056,16 +1041,9 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                   {documents.length} document{documents.length === 1 ? '' : 's'}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                {clubEnabled && (
-                  <Button variant="outline" onClick={() => setClubPanelOpen(true)}>
-                    <Globe className="h-4 w-4" /> Club
-                  </Button>
-                )}
-                <Button onClick={() => setShowUpload(true)}>
-                  <Upload className="h-4 w-4" /> Upload
-                </Button>
-              </div>
+              <Button onClick={() => setShowUpload(true)}>
+                <Upload className="h-4 w-4" /> Upload
+              </Button>
             </div>
 
             {!aiConfigured && (
@@ -1306,6 +1284,9 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                 <h2 className="min-w-0 flex-1 truncate text-base font-semibold sm:text-lg">{selectedDocument.title}</h2>
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                {clubEnabled && PublishToClubButton && (
+                  <PublishToClubButton doc={selectedDocument} snapshotHtml={docxHtml} />
+                )}
                 <Button variant="outline" size="sm" onClick={() => setDrawerOpen(true)}>
                   <MessageSquare className="h-4 w-4" /> <span className="hidden sm:inline">Explanations</span>
                 </Button>
@@ -1438,17 +1419,6 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
       )}
 
       {/* Welcome dialog */}
-      {clubEnabled && ClubPanel && (
-        <ClubPanel
-          open={clubPanelOpen}
-          onOpenChange={setClubPanelOpen}
-          documents={documents}
-          links={clubLinks}
-          renderDocxHtml={(raw) => processDocxHtml(raw).html}
-          txtToHtml={textToHtml}
-          onChanged={reloadLibrary}
-        />
-      )}
 
       <Dialog open={showWelcome} onOpenChange={open => { if (!open) dismissWelcome(); }}>
         <DialogContent>

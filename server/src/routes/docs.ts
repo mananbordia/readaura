@@ -69,6 +69,18 @@ docsRoutes.post('/publish', async (c) => {
   }
   if (!HASH_RE.test(body.contentHash)) return c.json({ error: 'bad content hash' }, 400);
 
+  // Author-only update: once a logicalId exists, only its original publisher
+  // (or an owner) may add a new version. Others must fork (publish a new copy
+  // under their own logicalId), which the client does for opened docs.
+  const [priorForLogical] = await db
+    .select({ publisherId: publishedDocs.publisherId })
+    .from(publishedDocs)
+    .where(and(eq(publishedDocs.clubId, clubId), eq(publishedDocs.logicalId, body.logicalId)))
+    .limit(1);
+  if (priorForLogical && priorForLogical.publisherId !== userId && c.get('role') !== 'owner') {
+    return c.json({ error: 'only the original publisher can update this doc' }, 403);
+  }
+
   if (body.fileType === 'docx' || body.fileType === 'txt') {
     if (typeof body.snapshotHtml !== 'string') {
       return c.json({ error: 'snapshotHtml required for docx/txt' }, 400);
