@@ -1,7 +1,6 @@
 CREATE TABLE "clubs" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"name" text NOT NULL,
-	"invite_code_hash" text NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
@@ -11,6 +10,21 @@ CREATE TABLE "doc_versions" (
 	"content_hash" text NOT NULL,
 	"published_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"publisher_id" uuid NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "invites" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"club_id" uuid NOT NULL,
+	"code_hash" text NOT NULL,
+	"code" text,
+	"role" text DEFAULT 'member' NOT NULL,
+	"label" text,
+	"created_by_user_id" uuid,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"expires_at" timestamp with time zone,
+	"used_at" timestamp with time zone,
+	"used_by_user_id" uuid,
+	CONSTRAINT "invites_code_hash_unique" UNIQUE("code_hash")
 );
 --> statement-breakpoint
 CREATE TABLE "memberships" (
@@ -79,6 +93,9 @@ CREATE TABLE "users" (
 );
 --> statement-breakpoint
 ALTER TABLE "doc_versions" ADD CONSTRAINT "doc_versions_publisher_id_users_id_fk" FOREIGN KEY ("publisher_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "invites" ADD CONSTRAINT "invites_club_id_clubs_id_fk" FOREIGN KEY ("club_id") REFERENCES "public"."clubs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "invites" ADD CONSTRAINT "invites_created_by_user_id_users_id_fk" FOREIGN KEY ("created_by_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "invites" ADD CONSTRAINT "invites_used_by_user_id_users_id_fk" FOREIGN KEY ("used_by_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "memberships" ADD CONSTRAINT "memberships_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "memberships" ADD CONSTRAINT "memberships_club_id_clubs_id_fk" FOREIGN KEY ("club_id") REFERENCES "public"."clubs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "personal_sync" ADD CONSTRAINT "personal_sync_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

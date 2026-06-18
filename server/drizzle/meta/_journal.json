@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1781671215896,
-      "tag": "0000_minor_betty_ross",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1781720797146,
-      "tag": "0001_wandering_unus",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1781737949138,
-      "tag": "0002_club_invite_codehash",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1781738527923,
-      "tag": "0003_foamy_omega_red",
+      "when": 1781791011592,
+      "tag": "0000_init",
       "breakpoints": true
     }
   ]
