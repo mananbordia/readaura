@@ -20,6 +20,16 @@ export type ClubLink = {
   mine: boolean;
 };
 
+// crypto.randomUUID needs a secure context; fall back so a non-secure context
+// surfaces the (clearer) hashing error rather than crashing here first.
+function newId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
 // Publish (or update) a local doc as a content-hash snapshot. For docx/txt pass
 // the rendered (data-tts-index-tagged) HTML the viewer already holds; for pdf
 // the bytes are read from storage. Reuses my logicalId to UPDATE my own doc;
@@ -35,7 +45,7 @@ export async function publishLocalDoc(opts: {
   if (existing && !existing.mine) {
     throw new Error('This document was opened from the club — it stays a local copy.');
   }
-  const logicalId = existing ? existing.logicalId : crypto.randomUUID();
+  const logicalId = existing ? existing.logicalId : newId();
 
   let contentHash: string;
   if (doc.fileType === 'pdf') {
@@ -61,7 +71,7 @@ export async function publishLocalDoc(opts: {
 
   // One link per local doc: replace the opened-from link with my publication.
   await putClubDoc({
-    id: existing?.id ?? crypto.randomUUID(),
+    id: existing?.id ?? newId(),
     logicalId, contentHash, cachedContentHash: contentHash, clubId: '',
     title: doc.title, tags: doc.tags, fileType: doc.fileType,
     publishedByName: session.displayName, publishedAt: new Date().toISOString(),
@@ -101,7 +111,7 @@ export async function openClubDoc(opts: { session: ClubSession; dto: PublishedDo
   }
 
   await putClubDoc({
-    id: existingLink?.id ?? crypto.randomUUID(),
+    id: existingLink?.id ?? newId(),
     logicalId: dto.logicalId, contentHash: dto.contentHash, cachedContentHash: dto.contentHash,
     clubId: '', title: dto.title, tags: dto.tags, fileType: dto.fileType,
     publishedByName: dto.publisherName, publishedAt: dto.publishedAt,

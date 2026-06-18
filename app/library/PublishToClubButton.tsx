@@ -67,7 +67,7 @@ export default function PublishToClubButton({ doc, snapshotHtml }: Props) {
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookUp className="h-4 w-4" />}
         <span className="hidden sm:inline">{label}</span>
       </Button>
-      {error && <span className="max-w-[12rem] truncate text-xs text-destructive" title={error}>{error}</span>}
+      {error && <span className="max-w-xs text-xs text-destructive">{error}</span>}
     </div>
   );
 }
