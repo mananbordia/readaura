@@ -16,6 +16,7 @@ import type {
   PersonalSyncOp,
   SavedExplanation,
   SharedAnnotationCache,
+  SyncDocBundle,
 } from './types';
 
 function getRandomUUID(): string {
@@ -157,6 +158,7 @@ export async function createDocument(args: {
   await tx.objectStore('documents').put(doc);
   await tx.objectStore('files').put({ id: doc.id, blob: args.blob });
   await tx.done;
+  await enqueueSync(doc.id, 'put');
   return doc;
 }
 
@@ -168,6 +170,7 @@ export async function updateDocument(
   const existing = await d.get('documents', id);
   if (!existing) return;
   await d.put('documents', { ...existing, title: patch.title, tags: patch.tags });
+  await enqueueSync(id, 'put');
 }
 
 export async function deleteDocument(id: string): Promise<void> {
@@ -185,6 +188,7 @@ export async function deleteDocument(id: string): Promise<void> {
     cursor = await cursor.continue();
   }
   await tx.done;
+  await enqueueSync(id, 'delete'); // explicit tombstone — never inferred from absence
 }
 
 // ---- Files (blobs) ------------------------------------------------------
@@ -198,6 +202,7 @@ export async function getFile(id: string): Promise<Blob | null> {
 // published revision without creating a duplicate library entry).
 export async function replaceFile(id: string, blob: Blob): Promise<void> {
   await (await db()).put('files', { id, blob });
+  await enqueueSync(id, 'put');
 }
 
 // ---- HTML overrides (edited DOCX / TXT) --------------------------------
@@ -211,6 +216,7 @@ export async function getHtmlOverride(id: string): Promise<string | null> {
 
 export async function setHtmlOverride(id: string, html: string): Promise<void> {
   await (await db()).put('htmlOverrides', { id, html });
+  await enqueueSync(id, 'put');
 }
 
 // ---- Explanations -------------------------------------------------------
@@ -247,6 +253,7 @@ export async function createExplanation(args: {
     })),
   };
   await (await db()).put('explanations', exp);
+  await enqueueSync(args.documentId, 'put');
   return exp;
 }
 
@@ -274,11 +281,16 @@ export async function appendExplanationMessages(
     messages: [...existing.messages, ...appended],
   };
   await d.put('explanations', next);
+  await enqueueSync(existing.documentId, 'put');
   return next;
 }
 
 export async function deleteExplanation(id: string): Promise<void> {
-  await (await db()).delete('explanations', id);
+  const d = await db();
+  const exp = await d.get('explanations', id);
+  await d.delete('explanations', id);
+  // Re-sync the parent doc's bundle (minus this note) rather than a doc delete.
+  if (exp) await enqueueSync(exp.documentId, 'put');
 }
 
 // ---- Club docs (local link between a library doc and a published doc) ----
@@ -301,4 +313,110 @@ export async function putClubDoc(row: ClubDoc): Promise<void> {
 
 export async function deleteClubDoc(id: string): Promise<void> {
   await (await db()).delete('clubDocs', id);
+}
+
+// ---- Personal sync (opt-in, account-level library mirror) ----------------
+// Local mutations enqueue an outbox op IFF sync is enabled; the club-gated sync
+// engine drains the queue. Deletes enqueue an EXPLICIT tombstone (never inferred
+// from absence), so a fresh/recovered device — with an empty queue — can only
+// restore, never wipe the cloud. Cached copies of OTHERS' club docs are excluded
+// (hidden from the library, re-fetchable from the club).
+
+const SYNC_META_KEY = 'state';
+const DEFAULT_SYNC_META: PersonalSyncMeta = { id: SYNC_META_KEY, enabled: false, lastPushedAt: null, lastPulledAt: null };
+
+export async function getSyncMeta(): Promise<PersonalSyncMeta> {
+  return (await (await db()).get('personalSyncMeta', SYNC_META_KEY)) ?? DEFAULT_SYNC_META;
+}
+
+export async function setSyncMeta(patch: Partial<Omit<PersonalSyncMeta, 'id'>>): Promise<PersonalSyncMeta> {
+  const d = await db();
+  const cur = (await d.get('personalSyncMeta', SYNC_META_KEY)) ?? DEFAULT_SYNC_META;
+  const next: PersonalSyncMeta = { ...cur, ...patch, id: SYNC_META_KEY };
+  await d.put('personalSyncMeta', next);
+  return next;
+}
+
+// Is this local doc a cached copy of someone else's club doc (mine !== true)?
+// Those are excluded from personal sync.
+async function isForeignClubCache(d: IDBPDatabase<ReadAuraDB>, docId: string): Promise<boolean> {
+  const link = await d.getFromIndex('clubDocs', 'by-localDocumentId', docId);
+  return !!link && link.mine !== true;
+}
+
+async function enqueueSync(key: string, action: 'put' | 'delete'): Promise<void> {
+  const d = await db();
+  const meta = await d.get('personalSyncMeta', SYNC_META_KEY);
+  if (!meta?.enabled) return;
+  if (await isForeignClubCache(d, key)) return;
+  await d.put('personalSyncQueue', {
+    id: getRandomUUID(),
+    kind: 'document',
+    key,
+    action,
+    createdAt: new Date().toISOString(),
+    attempts: 0,
+    lastError: null,
+  });
+}
+
+export async function listOutbox(): Promise<PersonalSyncOp[]> {
+  return (await db()).getAll('personalSyncQueue');
+}
+
+export async function clearOutboxOps(ids: string[]): Promise<void> {
+  const d = await db();
+  const tx = d.transaction('personalSyncQueue', 'readwrite');
+  for (const id of ids) await tx.objectStore('personalSyncQueue').delete(id);
+  await tx.done;
+}
+
+export async function clearOutbox(): Promise<void> {
+  await (await db()).clear('personalSyncQueue');
+}
+
+// On enable: enqueue a put for every OWN local document so the whole library
+// backs up (foreign club caches excluded).
+export async function enqueueAllDocsForBackfill(): Promise<void> {
+  const d = await db();
+  const docs = await d.getAll('documents');
+  const foreign = new Set(
+    (await d.getAll('clubDocs')).filter((l) => l.mine !== true && l.localDocumentId).map((l) => l.localDocumentId as string),
+  );
+  const tx = d.transaction('personalSyncQueue', 'readwrite');
+  for (const doc of docs) {
+    if (foreign.has(doc.id)) continue;
+    await tx.objectStore('personalSyncQueue').put({
+      id: getRandomUUID(), kind: 'document' as const, key: doc.id, action: 'put' as const,
+      createdAt: new Date().toISOString(), attempts: 0, lastError: null,
+    });
+  }
+  await tx.done;
+}
+
+// ---- Pull-apply (writes pulled from the cloud; must NOT re-enqueue) -------
+
+export async function applyRemoteDocBundle(bundle: SyncDocBundle, blob: Blob): Promise<void> {
+  const d = await db();
+  const tx = d.transaction(['documents', 'files', 'htmlOverrides', 'explanations'], 'readwrite');
+  await tx.objectStore('documents').put(bundle.doc);
+  await tx.objectStore('files').put({ id: bundle.doc.id, blob });
+  if (bundle.htmlOverride) await tx.objectStore('htmlOverrides').put({ id: bundle.doc.id, html: bundle.htmlOverride });
+  else await tx.objectStore('htmlOverrides').delete(bundle.doc.id);
+  const expStore = tx.objectStore('explanations');
+  let cur = await expStore.index('by-document').openCursor(bundle.doc.id);
+  while (cur) { await cur.delete(); cur = await cur.continue(); }
+  for (const e of bundle.explanations) await expStore.put(e);
+  await tx.done;
+}
+
+export async function applyRemoteDelete(docId: string): Promise<void> {
+  const d = await db();
+  const tx = d.transaction(['documents', 'files', 'htmlOverrides', 'explanations'], 'readwrite');
+  await tx.objectStore('documents').delete(docId);
+  await tx.objectStore('files').delete(docId);
+  await tx.objectStore('htmlOverrides').delete(docId);
+  let cur = await tx.objectStore('explanations').index('by-document').openCursor(docId);
+  while (cur) { await cur.delete(); cur = await cur.continue(); }
+  await tx.done;
 }

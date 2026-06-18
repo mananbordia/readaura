@@ -10,7 +10,7 @@ import {
 import type { Document, FileType, SavedExplanation } from '@/lib/types';
 import {
   listDocuments, createDocument, updateDocument, deleteDocument,
-  getFile, getHtmlOverride, setHtmlOverride, getClubDocByLocalId, listClubDocs,
+  getFile, getHtmlOverride, setHtmlOverride, getClubDocByLocalId, listClubDocs, getSyncMeta,
 } from '@/lib/storage';
 import { extractPdfText } from '@/lib/pdf-text';
 import { convertDocxBlobToHtml } from '@/lib/docx-html';
@@ -56,6 +56,7 @@ const PublishToClubButton = CLUB_BUILD
 // an `if (CLUB_BUILD)` block still emits a (non-whitelisted) chunk and trips the
 // flag-off parity gate.
 const loadClubShare = CLUB_BUILD ? () => import('@/lib/club/share') : null;
+const loadSyncEngine = CLUB_BUILD ? () => import('@/lib/sync/engine') : null;
 
 // PDF.js touches DOMMatrix at module load — defer to client-only.
 const PdfViewer = dynamic(
@@ -873,6 +874,22 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     const target = documents.find(d => d.id === docId);
     if (target) handleView(target);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docsLoaded]);
+
+  // If personal sync is on, run a cycle when the library loads so this device
+  // pulls/restores cloud changes (and pushes local ones). The club engine is
+  // dynamically imported behind the build flag (dead-code-eliminated when off).
+  useEffect(() => {
+    if (!loadSyncEngine || !docsLoaded) return;
+    let cancelled = false;
+    (async () => {
+      const meta = await getSyncMeta();
+      if (cancelled || !meta.enabled) return;
+      const { syncNow } = await loadSyncEngine();
+      const res = await syncNow();
+      if (!cancelled && res && res.pulled > 0) setDocuments(await listDocuments());
+    })().catch(() => {});
+    return () => { cancelled = true; };
   }, [docsLoaded]);
 
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {

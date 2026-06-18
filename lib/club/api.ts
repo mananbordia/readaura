@@ -12,6 +12,9 @@ import type {
   RecoverResponse,
   ShareAnnotationRequest,
   SharedAnnotationDTO,
+  SyncPullResponse,
+  SyncPushRequest,
+  SyncPushResponse,
 } from '@/shared/club-types';
 import { writeClubSession } from '@/lib/use-club';
 
@@ -130,4 +133,32 @@ export const clubApi = {
       headers: { 'content-type': 'application/json', ...auth(token) },
       body: JSON.stringify({ clientId }),
     }).then((r) => jsonOrThrow<{ ok: boolean }>(r)),
+
+  // ---- Personal sync (account-level library mirror) ----
+  pullSync: (token: string, since: string | null) =>
+    fetch(`${BASE}/sync${since ? `?since=${encodeURIComponent(since)}` : ''}`, { headers: auth(token) })
+      .then((r) => jsonOrThrow<SyncPullResponse>(r)),
+
+  pushSync: (token: string, body: SyncPushRequest) =>
+    fetch(`${BASE}/sync`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...auth(token) },
+      body: JSON.stringify(body),
+    }).then((r) => jsonOrThrow<SyncPushResponse>(r)),
+
+  syncBlobExists: (token: string, hash: string) =>
+    fetch(`${BASE}/sync/blobs/${hash}`, { method: 'HEAD', headers: auth(token) }).then((r) => r.ok),
+
+  putSyncBlob: (token: string, hash: string, body: Blob) =>
+    fetch(`${BASE}/sync/blobs/${hash}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/octet-stream', ...auth(token) },
+      body,
+    }).then((r) => jsonOrThrow<{ ok: boolean }>(r)),
+
+  getSyncBlobBytes: (token: string, hash: string) =>
+    fetch(`${BASE}/sync/blobs/${hash}`, { headers: auth(token) }).then(async (r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return new Uint8Array(await r.arrayBuffer());
+    }),
 };

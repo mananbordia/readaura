@@ -121,3 +121,14 @@ export type PersonalSyncMeta = {
   lastPushedAt: string | null;
   lastPulledAt: string | null;
 };
+
+/** The unit of personal sync: a whole document (metadata + edits + its private
+ *  explanations) bundled together; the file bytes are referenced by `fileHash`
+ *  and stored in the per-account blob store. */
+export type SyncDocBundle = {
+  doc: Document;
+  fileHash: string;
+  fileMime: string;
+  htmlOverride: string | null;
+  explanations: SavedExplanation[];
+};

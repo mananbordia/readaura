@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  BookUp, Check, ChevronRight, Copy, Globe, Loader2, LogOut, RefreshCw, Trash2, UserPlus,
+  BookUp, Check, ChevronRight, Cloud, Copy, Globe, Loader2, LogOut, RefreshCw, Trash2, UserPlus,
 } from 'lucide-react';
 import type { InviteDTO, MemberDTO, PublishedDocDTO } from '@/shared/club-types';
 import type { Document } from '@/lib/types';
@@ -11,7 +11,9 @@ import { useClub } from '@/lib/use-club';
 import { clubApi } from '@/lib/club/api';
 import { openClubDoc, publishLocalDoc, unpublishDoc, type ClubLink } from '@/lib/club/actions';
 import { buildDocSnapshotHtml } from '@/lib/club/snapshot';
-import { getDocument, listClubDocs, listDocuments, putClubDoc } from '@/lib/storage';
+import { enableSync, disableSync, syncNow } from '@/lib/sync/engine';
+import { getDocument, getSyncMeta, listClubDocs, listDocuments, putClubDoc } from '@/lib/storage';
+import { timeAgo } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -58,6 +60,12 @@ export default function ClubClient() {
   const [members, setMembers] = useState<MemberDTO[]>([]);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+
+  // Personal sync (account-level library backup/restore).
+  const [syncEnabled, setSyncEnabled] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [lastSynced, setLastSynced] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState('');
 
   // Publish-a-document picker
   const [publishOpen, setPublishOpen] = useState(false);
@@ -127,6 +135,55 @@ export default function ClubClient() {
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
   }, []);
+
+  // Load sync state on sign-in; if it's on, run a cycle (push local changes,
+  // pull/restore remote ones).
+  useEffect(() => {
+    if (!club.signedIn) return;
+    let cancelled = false;
+    (async () => {
+      const meta = await getSyncMeta();
+      if (cancelled) return;
+      setSyncEnabled(meta.enabled);
+      setLastSynced(meta.lastPulledAt);
+      if (!meta.enabled) return;
+      setSyncBusy(true);
+      try {
+        await syncNow();
+        const m = await getSyncMeta();
+        if (!cancelled) setLastSynced(m.lastPulledAt);
+      } catch (e) {
+        if (!cancelled) setSyncError(e instanceof Error ? e.message : 'Sync failed.');
+      }
+      if (!cancelled) setSyncBusy(false);
+    })();
+    return () => { cancelled = true; };
+  }, [club.signedIn]);
+
+  const runSyncNow = async () => {
+    setSyncBusy(true); setSyncError('');
+    try {
+      await syncNow();
+      setLastSynced((await getSyncMeta()).lastPulledAt);
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : 'Sync failed.');
+    }
+    setSyncBusy(false);
+  };
+
+  const toggleSync = async () => {
+    setSyncBusy(true); setSyncError('');
+    try {
+      if (syncEnabled) await disableSync();
+      else await enableSync(); // restores on a fresh device + backs up the library
+      const m = await getSyncMeta();
+      setSyncEnabled(m.enabled);
+      setLastSynced(m.lastPulledAt);
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : 'Sync failed.');
+    }
+    setSyncBusy(false);
+  };
 
   const submitAuth = async () => {
     setSubmitting(true);
@@ -302,6 +359,41 @@ export default function ClubClient() {
           <span>{club.session?.displayName}{club.session?.role === 'owner' ? ' · owner' : ''}</span>
           <Button variant="ghost" size="sm" onClick={handleSignOut}><LogOut className="h-4 w-4" /> Sign out</Button>
         </div>
+      </div>
+
+      {/* Account-level library sync (opt-in; backs up + restores your library). */}
+      <div className="mt-4 rounded-lg border border-border p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Cloud className="h-4 w-4 shrink-0 text-primary" />
+            <div className="min-w-0">
+              <div className="text-sm font-medium">Library sync</div>
+              <div className="text-xs text-muted-foreground">
+                {syncBusy ? 'Syncing…'
+                  : syncEnabled ? `On${lastSynced ? ` · synced ${timeAgo(lastSynced)}` : ''}`
+                  : 'Back up your library to your account and restore it on any device.'}
+              </div>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {syncEnabled && (
+              <Button size="sm" variant="ghost" onClick={runSyncNow} disabled={syncBusy}>
+                {syncBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                <span className="hidden sm:inline">Sync now</span>
+              </Button>
+            )}
+            <Button size="sm" variant={syncEnabled ? 'outline' : 'default'} onClick={toggleSync} disabled={syncBusy}>
+              {syncBusy && !syncEnabled ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {syncEnabled ? 'Turn off' : 'Turn on'}
+            </Button>
+          </div>
+        </div>
+        {!syncEnabled && (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Uploads your private documents and notes to your account — unencrypted for now.
+          </p>
+        )}
+        {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
       </div>
 
       <div className="mt-4 flex items-center gap-1 border-b border-border">
