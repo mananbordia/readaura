@@ -50,6 +50,12 @@ const CLUB_BUILD = process.env.NEXT_PUBLIC_CLUB_ENABLED === 'true';
 const PublishToClubButton = CLUB_BUILD
   ? dynamic(() => import('./PublishToClubButton'), { ssr: false })
   : null;
+// Loader for the club share helpers. Putting the dynamic import() in a ternary
+// branch keyed on the build flag (same shape as next/dynamic above) lets the
+// bundler dead-code-eliminate it in the flag-off build — a bare import() inside
+// an `if (CLUB_BUILD)` block still emits a (non-whitelisted) chunk and trips the
+// flag-off parity gate.
+const loadClubShare = CLUB_BUILD ? () => import('@/lib/club/share') : null;
 
 // PDF.js touches DOMMatrix at module load — defer to client-only.
 const PdfViewer = dynamic(
@@ -326,11 +332,11 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     setExplanationsRefreshKey(k => k + 1); // refresh the local list immediately
     // Share to the club only when the user chose "Save to club" (opt-in). Club
     // code is dynamically imported so it never ships in the flag-off build.
-    if (opts?.share && CLUB_BUILD && selectedDocument) {
+    if (opts?.share && loadClubShare && selectedDocument) {
       const docId = selectedDocument.id;
       (async () => {
         try {
-          const { pushShared } = await import('@/lib/club/share');
+          const { pushShared } = await loadClubShare();
           await pushShared(docId, exp);
           setExplanationsRefreshKey(k => k + 1); // re-pull shared once it lands
         } catch { /* sharing is best-effort */ }
@@ -366,10 +372,10 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
   // Deleting a local explanation also unshares it from the club (best-effort).
   const handleExplanationDeleted = (id: string) => {
     setExplanationsRefreshKey(k => k + 1);
-    if (CLUB_BUILD) {
+    if (loadClubShare) {
       (async () => {
         try {
-          const { removeShared } = await import('@/lib/club/share');
+          const { removeShared } = await loadClubShare();
           await removeShared(id);
           setExplanationsRefreshKey(k => k + 1);
         } catch { /* best-effort */ }
@@ -383,11 +389,11 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
   useEffect(() => {
     if (!selectedDocument) { setSharedExps([]); return; }
     let cancelled = false;
-    if (CLUB_BUILD) {
+    if (loadClubShare) {
       const docId = selectedDocument.id;
       (async () => {
         try {
-          const { pullShared } = await import('@/lib/club/share');
+          const { pullShared } = await loadClubShare();
           const list = await pullShared(docId);
           if (!cancelled) setSharedExps(list);
         } catch { if (!cancelled) setSharedExps([]); }
