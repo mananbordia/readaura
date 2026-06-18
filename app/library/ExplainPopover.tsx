@@ -3,12 +3,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
-import { Loader2, Save, Send, Sparkles, Square, AlertCircle, RotateCcw } from 'lucide-react';
+import { Loader2, Save, Send, Sparkles, Square, AlertCircle, RotateCcw, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { readApiKey } from '@/lib/use-api-key';
 import { createExplanation, appendExplanationMessages } from '@/lib/storage';
+import type { SavedExplanation } from '@/lib/types';
 
 const MAX_TURNS = 20;
 
@@ -18,10 +19,17 @@ type Props = {
   selectedText: string;
   contextBefore: string;
   contextAfter: string;
+  /** data-tts-index of the selection's block, stored so a shared explanation
+   *  can be anchored to that paragraph. */
+  blockIndex?: number | null;
+  /** Whether this doc belongs to a club (enables the "Save to club" action). */
+  canShareToClub?: boolean;
   initialMessages?: UIMessage[];
   initialExplanationId?: string | null;
   onClose: () => void;
-  onSaved?: () => void;
+  /** Called after a successful save with the persisted explanation. `share` is
+   *  true when the user chose "Save to club" (the parent then shares it). */
+  onSaved?: (exp: SavedExplanation, opts: { share: boolean }) => void;
 };
 
 function getMessageText(m: UIMessage): string {
@@ -34,6 +42,8 @@ export default function ExplainPopover({
   selectedText,
   contextBefore,
   contextAfter,
+  blockIndex,
+  canShareToClub,
   initialMessages,
   initialExplanationId,
   onClose,
@@ -92,7 +102,6 @@ export default function ExplainPopover({
   const assistantCount = messages.filter(m => m.role === 'assistant').length;
   const canSave = assistantCount > 0 && !isStreaming;
   const totalTurns = messages.length;
-  const hasUnsavedChanges = messages.length > savedMessageCount;
   const followupCapReached = totalTurns >= MAX_TURNS;
 
   const handleSend = () => {
@@ -109,7 +118,7 @@ export default function ExplainPopover({
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (share: boolean) => {
     if (!canSave) return;
     setSaveStatus('saving');
 
@@ -118,28 +127,44 @@ export default function ExplainPopover({
       .map(m => ({ role: m.role as 'user' | 'assistant', content: getMessageText(m) }));
 
     try {
+      let result: SavedExplanation | null = null;
       if (!savedId) {
-        const exp = await createExplanation({
+        result = await createExplanation({
           documentId,
           selectedText,
           contextBefore,
           contextAfter,
+          blockIndex,
           messages: messagesToPersist,
         });
-        setSavedId(exp.id);
+        setSavedId(result.id);
         setSavedMessageCount(messages.length);
       } else {
         const newMessages = messagesToPersist.slice(savedMessageCount);
-        if (newMessages.length === 0) {
-          setSaveStatus('saved');
-          setTimeout(() => setSaveStatus('idle'), 1500);
-          return;
+        if (newMessages.length > 0) {
+          result = await appendExplanationMessages(savedId, newMessages);
+          setSavedMessageCount(messages.length);
         }
-        await appendExplanationMessages(savedId, newMessages);
-        setSavedMessageCount(messages.length);
       }
       setSaveStatus('saved');
-      onSaved?.();
+      // Always hand back an explanation so "Save to club" works even when the
+      // thread was already saved locally (no new messages). Reconstruct from the
+      // current props when there's nothing fresh to persist.
+      const finalId = result?.id ?? savedId;
+      if (finalId) {
+        const exp: SavedExplanation = result ?? {
+          id: finalId,
+          documentId,
+          selectedText,
+          contextBefore,
+          contextAfter,
+          blockIndex: blockIndex ?? null,
+          createdAt: '',
+          updatedAt: '',
+          messages: messagesToPersist.map((m, i) => ({ id: String(i), role: m.role, content: m.content, createdAt: '', sequence: i })),
+        };
+        onSaved?.(exp, { share });
+      }
       setTimeout(() => setSaveStatus('idle'), 1500);
     } catch {
       setSaveStatus('error');
@@ -246,21 +271,29 @@ export default function ExplainPopover({
         <div className="flex items-center gap-2 border-t border-border bg-muted/30 px-3 py-2">
           <Button
             size="sm"
-            variant={savedId && !hasUnsavedChanges ? 'ghost' : 'default'}
-            onClick={handleSave}
+            variant="default"
+            onClick={() => handleSave(false)}
             disabled={!canSave || saveStatus === 'saving'}
           >
             {saveStatus === 'saving' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            {saveStatus === 'saving' ? 'Saving…'
-              : saveStatus === 'saved' ? 'Saved'
-              : saveStatus === 'error' ? 'Failed'
-              : savedId ? (hasUnsavedChanges ? 'Update note' : 'Saved')
-              : 'Save note'}
+            Save locally
           </Button>
+          {canShareToClub && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleSave(true)}
+              disabled={!canSave || saveStatus === 'saving'}
+            >
+              <Users className="h-3.5 w-3.5" /> Save to club
+            </Button>
+          )}
           <Button size="sm" variant="ghost" onClick={handleNewQuestion} disabled={isStreaming}>
             New question
           </Button>
-          <span className="ml-auto text-xs text-muted-foreground">{totalTurns}/{MAX_TURNS} turns</span>
+          <span className="ml-auto text-xs text-muted-foreground">
+            {saveStatus === 'saved' ? 'Saved' : saveStatus === 'error' ? 'Failed' : `${totalTurns}/${MAX_TURNS} turns`}
+          </span>
         </div>
       </DialogContent>
     </Dialog>

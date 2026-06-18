@@ -4,6 +4,10 @@ import { env } from './env';
 import { proxyGuard } from './middleware/proxy-guard';
 import { ensureSeed } from './seed';
 import { authRoutes } from './routes/auth';
+import { blobsRoutes, docsRoutes } from './routes/docs';
+import { invitesRoutes } from './routes/invites';
+import { membersRoutes } from './routes/members';
+import { annotationsRoutes } from './routes/annotations';
 
 const app = new Hono();
 
@@ -12,11 +16,31 @@ const app = new Hono();
 app.get('/health', (c) => c.json({ ok: true, service: 'readaura-club' }));
 
 // Everything below requires the shared proxy secret.
+// Guard exact mount paths AND subpaths (e.g. GET /docs is the discover list).
 app.use('/auth/*', proxyGuard);
 app.route('/auth', authRoutes);
 
-// Phase 2 mounts /docs, /blob; Phase 3 mounts /annotations; the personal-sync
-// track mounts /sync — each behind its own proxyGuard.
+app.use('/docs', proxyGuard);
+app.use('/docs/*', proxyGuard);
+app.route('/docs', docsRoutes);
+
+app.use('/blobs/*', proxyGuard);
+app.route('/blobs', blobsRoutes);
+
+app.use('/invites', proxyGuard);
+app.use('/invites/*', proxyGuard);
+app.route('/invites', invitesRoutes);
+
+app.use('/members', proxyGuard);
+app.use('/members/*', proxyGuard);
+app.route('/members', membersRoutes);
+
+// Phase 3: shared annotations (explanations auto-shared onto club docs).
+app.use('/annotations', proxyGuard);
+app.use('/annotations/*', proxyGuard);
+app.route('/annotations', annotationsRoutes);
+
+// The personal-sync track mounts /sync later, behind its own proxyGuard.
 
 await ensureSeed();
 

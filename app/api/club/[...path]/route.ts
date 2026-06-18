@@ -51,6 +51,14 @@ async function proxy(
   const secret = process.env.CLUB_PROXY_SECRET;
   if (secret) headers.set('x-club-proxy-secret', secret);
 
+  // Forward the real (Vercel-set) client IP so the backend can rate-limit per
+  // principal. Set AFTER the copy loop and delete any inbound value first, so a
+  // client can't spoof it.
+  headers.delete('x-club-client-ip');
+  const clientIp =
+    req.headers.get('x-real-ip') || req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || '';
+  if (clientIp) headers.set('x-club-client-ip', clientIp);
+
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
   const init: RequestInit & { duplex?: 'half' } = {
     method: req.method,

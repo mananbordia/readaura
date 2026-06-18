@@ -49,6 +49,7 @@ export type PublishedDocDTO = {
   tags: string[];
   fileType: ClubFileType;
   snapshotFormatVersion: number;
+  publisherId: string;
   publisherName: string;
   publishedAt: string;
   updatedAt: string;
@@ -77,12 +78,34 @@ export type JoinResponse = {
   token: string;
   userId: string;
   displayName: string;
+  role: MemberRole;
   /** Shown to the user exactly once; re-entering it reclaims this same userId
    *  after a browser wipe. Hashed at rest server-side, rotated on use. */
   recoveryCode: string;
 };
 export type RecoverRequest = { recoveryCode: string };
 export type RecoverResponse = JoinResponse;
+
+// Single-use, per-member invites. An owner mints one code per member; the code
+// is consumed on join. The very first owner bootstraps from a code the server
+// prints to its logs on first start.
+export type CreateInviteRequest = { label?: string; role?: MemberRole };
+export type CreateInviteResponse = { code: string; role: MemberRole; label: string | null };
+
+// Owner-only Members-tab views.
+export type InviteDTO = {
+  id: string;
+  code: string;
+  role: MemberRole;
+  expiresAt: string | null;
+  createdAt: string;
+};
+export type MemberDTO = {
+  userId: string;
+  displayName: string;
+  role: MemberRole;
+  joinedAt: string;
+};
 
 // ---- Publish / discover --------------------------------------------------
 
@@ -96,6 +119,20 @@ export type PublishRequest = {
   /** DOCX/TXT carry their rendered snapshot HTML inline; PDFs upload bytes in a
    *  separate content-addressed step keyed by `contentHash`. */
   snapshotHtml?: string;
+};
+
+// ---- Shared annotations (Phase 3) ----------------------------------------
+// A member's explanation/highlight shared with the club, anchored to a doc by
+// logicalId. Upserted by (authorId, clientId) so re-pushing the same local note
+// updates its server row rather than duplicating.
+export type ShareAnnotationRequest = {
+  logicalId: string;
+  kind: SharedAnnotationKind;
+  anchor: TextQuoteAnchor;
+  selectedText: string;
+  payload: SharedAnnotationPayload;
+  /** The author's local IndexedDB id (the SavedExplanation id) — the upsert key. */
+  clientId: string;
 };
 
 // ---- Personal sync (a SEPARATE lane from clubs; opt-in; default off) ------

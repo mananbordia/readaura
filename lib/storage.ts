@@ -194,6 +194,12 @@ export async function getFile(id: string): Promise<Blob | null> {
   return row?.blob ?? null;
 }
 
+// Replace a document's stored blob in place (used to sync a club doc to a newer
+// published revision without creating a duplicate library entry).
+export async function replaceFile(id: string, blob: Blob): Promise<void> {
+  await (await db()).put('files', { id, blob });
+}
+
 // ---- HTML overrides (edited DOCX / TXT) --------------------------------
 
 export async function getHtmlOverride(id: string): Promise<string | null> {
@@ -219,6 +225,7 @@ export async function createExplanation(args: {
   selectedText: string;
   contextBefore: string;
   contextAfter: string;
+  blockIndex?: number | null;
   messages: { role: 'user' | 'assistant'; content: string }[];
 }): Promise<SavedExplanation> {
   const now = new Date().toISOString();
@@ -228,6 +235,7 @@ export async function createExplanation(args: {
     selectedText: args.selectedText,
     contextBefore: args.contextBefore,
     contextAfter: args.contextAfter,
+    blockIndex: args.blockIndex ?? null,
     createdAt: now,
     updatedAt: now,
     messages: args.messages.map((m, i) => ({
@@ -271,4 +279,26 @@ export async function appendExplanationMessages(
 
 export async function deleteExplanation(id: string): Promise<void> {
   await (await db()).delete('explanations', id);
+}
+
+// ---- Club docs (local link between a library doc and a published doc) ----
+
+export async function listClubDocs(): Promise<ClubDoc[]> {
+  return (await db()).getAll('clubDocs');
+}
+
+export async function getClubDocByLogicalId(logicalId: string): Promise<ClubDoc | null> {
+  return (await (await db()).getFromIndex('clubDocs', 'by-logicalId', logicalId)) ?? null;
+}
+
+export async function getClubDocByLocalId(localDocumentId: string): Promise<ClubDoc | null> {
+  return (await (await db()).getFromIndex('clubDocs', 'by-localDocumentId', localDocumentId)) ?? null;
+}
+
+export async function putClubDoc(row: ClubDoc): Promise<void> {
+  await (await db()).put('clubDocs', row);
+}
+
+export async function deleteClubDoc(id: string): Promise<void> {
+  await (await db()).delete('clubDocs', id);
 }

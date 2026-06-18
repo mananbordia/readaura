@@ -31,7 +31,6 @@ export const users = pgTable('users', {
 export const clubs = pgTable('clubs', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
-  inviteCodeHash: text('invite_code_hash').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -46,6 +45,29 @@ export const memberships = pgTable(
   },
   (t) => [unique('memberships_user_club').on(t.userId, t.clubId)],
 );
+
+// Single-use, per-member invite codes: a short 6-char code, stored as its
+// SHA-256 (fast, indexed lookup; the code is low-value + single-use, so a
+// password hash + brute-force throttle on join is the right tradeoff). An owner
+// mints one per member; consuming it on join sets usedAt/usedByUserId.
+export const invites = pgTable('invites', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  clubId: uuid('club_id').notNull().references(() => clubs.id, { onDelete: 'cascade' }),
+  codeHash: text('code_hash').notNull().unique(),
+  // Plaintext code, retained ONLY while the invite is active so the owner can
+  // see/re-share pending invites; cleared (NULL) when consumed on join, so a DB
+  // leak never exposes a used code. Lookup on join still goes via codeHash.
+  code: text('code'),
+  role: text('role').notNull().default('member'),
+  label: text('label'),
+  createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  // Null = never expires (used for the operator-controlled bootstrap invite).
+  // Member invites get a short TTL so the 30-bit code space can't be walked.
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  usedByUserId: uuid('used_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+});
 
 export const publishedDocs = pgTable(
   'published_docs',

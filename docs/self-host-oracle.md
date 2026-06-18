@@ -69,9 +69,13 @@ CLUB_JWT_SECRET=<from openssl>
 CLUB_PROXY_SECRET=<from openssl — must match Vercel>
 PORT=8080
 CLUB_NAME=ReadAura Club
-CLUB_INVITE_CODE=<the code you hand to members>
 SYNC_MAX_BYTES=5000000
 ```
+
+There is no shared invite code. Membership uses **single-use, per-member
+invites**: on first start the server prints a one-time **bootstrap owner
+invite** to its logs — join once with it to become owner, then mint a member
+invite per person from the in-app Club panel (Owner → "Invite a member").
 
 ## 5. Apply the schema
 
@@ -91,7 +95,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now readaura-club
 systemctl is-active readaura-club
 curl -s localhost:8080/health    # {"ok":true,"service":"readaura-club"}
-journalctl -u readaura-club -f   # logs (club seeded from CLUB_INVITE_CODE on first start)
+journalctl -u readaura-club -f   # find the one-time BOOTSTRAP OWNER INVITE printed on first start
 ```
 
 ## 7. Open port 8080 — BOTH layers (Oracle's classic gotcha)

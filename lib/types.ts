@@ -32,6 +32,10 @@ export type SavedExplanation = {
   createdAt: string;
   updatedAt: string;
   messages: ExplanationMessage[];
+  /** data-tts-index of the block the selection started in, captured at creation.
+   *  Stable across club members (the snapshot HTML is content-addressed), so it
+   *  anchors a shared explanation's margin bubble to the right paragraph. */
+  blockIndex?: number | null;
   /** Present ONLY when the user has explicitly shared this note to a club.
    *  Absent => private: it never enters the club outbox and never transits the
    *  network. This single optional field is the entire private/shared switch. */
@@ -63,6 +67,9 @@ export type ClubDoc = {
   snapshotFormatVersion: number;
   /** The `documents` store id once this snapshot is imported, else null. */
   localDocumentId: string | null;
+  /** True if THIS user published it (can update); false if opened from someone
+   *  else (publishing again forks to a new logicalId). */
+  mine?: boolean;
 };
 
 /** Read-only local cache of shared annotations merged from the backend. */

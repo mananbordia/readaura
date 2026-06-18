@@ -16,8 +16,8 @@ export const env = {
   /** Only the Vercel proxy knows this; every non-health route requires it. */
   CLUB_PROXY_SECRET: required('CLUB_PROXY_SECRET'),
   PORT: Number(process.env.PORT ?? 8080),
+  /** Content-addressed blob store (snapshot HTML + PDF bytes). */
+  CLUB_BLOB_DIR: process.env.CLUB_BLOB_DIR ?? '/home/ubuntu/readaura/blobs',
   CLUB_NAME: process.env.CLUB_NAME ?? 'ReadAura Club',
-  /** Optional single-club seed; the club is created on first start if absent. */
-  CLUB_INVITE_CODE: process.env.CLUB_INVITE_CODE,
   SYNC_MAX_BYTES: Number(process.env.SYNC_MAX_BYTES ?? 5_000_000),
 };
