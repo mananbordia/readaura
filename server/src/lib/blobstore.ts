@@ -39,3 +39,39 @@ export async function getBlob(hash: string): Promise<Buffer | null> {
     return null;
   }
 }
+
+// ---- Personal sync blobs (private, per-account) --------------------------
+// A separate, owner-scoped store under personal/<userId>/<hash>. Unlike club
+// blobs (shared within a club), these are a user's private files — access is
+// gated by the JWT userId in the /sync routes, never by hash alone.
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function personalPathFor(userId: string, hash: string): string {
+  if (!UUID_RE.test(userId)) throw new Error('invalid user id');
+  if (!HASH_RE.test(hash)) throw new Error('invalid content hash');
+  return join(env.CLUB_BLOB_DIR, 'personal', userId, hash);
+}
+
+export async function personalBlobExists(userId: string, hash: string): Promise<boolean> {
+  try {
+    await access(personalPathFor(userId, hash));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function putPersonalBlob(userId: string, hash: string, data: Uint8Array): Promise<void> {
+  const path = personalPathFor(userId, hash);
+  await mkdir(join(env.CLUB_BLOB_DIR, 'personal', userId), { recursive: true });
+  await writeFile(path, data);
+}
+
+export async function getPersonalBlob(userId: string, hash: string): Promise<Buffer | null> {
+  try {
+    return await readFile(personalPathFor(userId, hash));
+  } catch {
+    return null;
+  }
+}

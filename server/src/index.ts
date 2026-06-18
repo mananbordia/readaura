@@ -8,6 +8,7 @@ import { blobsRoutes, docsRoutes } from './routes/docs';
 import { invitesRoutes } from './routes/invites';
 import { membersRoutes } from './routes/members';
 import { annotationsRoutes } from './routes/annotations';
+import { syncRoutes } from './routes/sync';
 
 const app = new Hono();
 
@@ -40,7 +41,10 @@ app.use('/annotations', proxyGuard);
 app.use('/annotations/*', proxyGuard);
 app.route('/annotations', annotationsRoutes);
 
-// The personal-sync track mounts /sync later, behind its own proxyGuard.
+// Personal sync (opt-in account-level library mirror; separate lane from clubs).
+app.use('/sync', proxyGuard);
+app.use('/sync/*', proxyGuard);
+app.route('/sync', syncRoutes);
 
 await ensureSeed();
 

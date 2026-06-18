@@ -157,4 +157,20 @@ export type SyncPushItem = {
   envelope: SyncEnvelope | null;
 };
 
+// Push a batch of local changes (incl. explicit delete tombstones — deletes are
+// NEVER inferred from absence, so a fresh/recovered device can't wipe the cloud).
+export type SyncPushRequest = { items: SyncPushItem[] };
+export type SyncPushResponse = { ok: true; serverTime: string };
+
+// A row returned by pull. `envelope` is null for tombstones (deletedAt set).
+export type SyncPullRow = {
+  kind: SyncKind;
+  key: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  envelope: SyncEnvelope | null;
+};
+// `since` filters by updatedAt; echo `serverTime` back as the next cursor.
+export type SyncPullResponse = { rows: SyncPullRow[]; serverTime: string };
+
 export type ApiError = { error: string };
