@@ -10,7 +10,7 @@ import {
 import type { Document, FileType, SavedExplanation } from '@/lib/types';
 import {
   listDocuments, createDocument, updateDocument, deleteDocument,
-  getFile, getHtmlOverride, setHtmlOverride, getClubDocByLocalId, listClubDocs, getSyncMeta,
+  getFile, getHtmlOverride, setHtmlOverride, getClubDocByLocalId, listClubDocs,
 } from '@/lib/storage';
 import { extractPdfText } from '@/lib/pdf-text';
 import { convertDocxBlobToHtml } from '@/lib/docx-html';
@@ -56,7 +56,9 @@ const PublishToClubButton = CLUB_BUILD
 // an `if (CLUB_BUILD)` block still emits a (non-whitelisted) chunk and trips the
 // flag-off parity gate.
 const loadClubShare = CLUB_BUILD ? () => import('@/lib/club/share') : null;
-const loadSyncEngine = CLUB_BUILD ? () => import('@/lib/sync/engine') : null;
+const LibrarySyncCard = CLUB_BUILD
+  ? dynamic(() => import('./LibrarySyncCard'), { ssr: false })
+  : null;
 
 // PDF.js touches DOMMatrix at module load — defer to client-only.
 const PdfViewer = dynamic(
@@ -876,21 +878,6 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docsLoaded]);
 
-  // If personal sync is on, run a cycle when the library loads so this device
-  // pulls/restores cloud changes (and pushes local ones). The club engine is
-  // dynamically imported behind the build flag (dead-code-eliminated when off).
-  useEffect(() => {
-    if (!loadSyncEngine || !docsLoaded) return;
-    let cancelled = false;
-    (async () => {
-      const meta = await getSyncMeta();
-      if (cancelled || !meta.enabled) return;
-      const { syncNow } = await loadSyncEngine();
-      const res = await syncNow();
-      if (!cancelled && res && res.pulled > 0) setDocuments(await listDocuments());
-    })().catch(() => {});
-    return () => { cancelled = true; };
-  }, [docsLoaded]);
 
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!(e.metaKey || e.ctrlKey)) return;
@@ -1244,6 +1231,10 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
               <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                 {error}
               </div>
+            )}
+
+            {LibrarySyncCard && (
+              <LibrarySyncCard onSynced={() => { listDocuments().then(setDocuments); }} />
             )}
 
             {!libraryIsEmpty && (
