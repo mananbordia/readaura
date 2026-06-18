@@ -10,6 +10,7 @@ import type {
   PublishRequest,
   PublishedDocDTO,
   RecoverResponse,
+  RegenerateRecoveryResponse,
   ShareAnnotationRequest,
   SharedAnnotationDTO,
   SyncPullResponse,
@@ -56,6 +57,12 @@ export const clubApi = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ recoveryCode }),
     }).then((r) => jsonOrThrow<RecoverResponse>(r)),
+
+  // Regenerate the recovery code for a logged-in member (the old one is stored
+  // hashed and can't be shown, so this issues a fresh one + invalidates the old).
+  regenerateRecovery: (token: string) =>
+    fetch(`${BASE}/auth/recovery`, { method: 'POST', headers: auth(token) })
+      .then((r) => jsonOrThrow<RegenerateRecoveryResponse>(r)),
 
   createInvite: (token: string) =>
     fetch(`${BASE}/invites`, {

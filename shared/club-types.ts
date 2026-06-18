@@ -86,6 +86,11 @@ export type JoinResponse = {
 export type RecoverRequest = { recoveryCode: string };
 export type RecoverResponse = JoinResponse;
 
+// A logged-in member regenerates their recovery code (the secret is stored
+// hashed, so the original can't be re-shown — this issues a fresh one and
+// invalidates the old). Returns the new code, shown once.
+export type RegenerateRecoveryResponse = { recoveryCode: string };
+
 // Single-use, per-member invites. An owner mints one code per member; the code
 // is consumed on join. The very first owner bootstraps from a code the server
 // prints to its logs on first start.

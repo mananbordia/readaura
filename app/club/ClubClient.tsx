@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  BookUp, Check, ChevronRight, Copy, Globe, Loader2, LogOut, RefreshCw, Trash2, UserPlus,
+  BookUp, Check, ChevronRight, Copy, Globe, KeyRound, Loader2, LogOut, RefreshCw, Trash2, UserPlus,
 } from 'lucide-react';
 import type { InviteDTO, MemberDTO, PublishedDocDTO } from '@/shared/club-types';
 import type { Document } from '@/lib/types';
@@ -149,6 +149,21 @@ export default function ClubClient() {
     setMode('join'); setInviteCode(''); setDisplayName(''); setRecoveryInput('');
     setRecoveryCode(null);
     setDocs([]); setLinks([]); setInvites([]); setMembers([]); setError('');
+  };
+
+  // Re-show the recovery code. It's stored hashed (can't be revealed), so this
+  // mints a fresh one and invalidates the old — confirm before rotating.
+  const showRecoveryCode = async () => {
+    const token = club.session?.token;
+    if (!token) return;
+    if (!confirm('Show your recovery code?\n\nFor security it’s stored hashed, so we generate a NEW code and your current one stops working. Save the new code somewhere safe.')) return;
+    setError('');
+    try {
+      const res = await clubApi.regenerateRecovery(token);
+      setRecoveryCode(res.recoveryCode);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not generate a recovery code.');
+    }
   };
 
   const run = async (id: string, fn: () => Promise<void>) => {
@@ -300,6 +315,7 @@ export default function ClubClient() {
         <h1 className="flex items-center gap-2 text-xl font-semibold"><Globe className="h-5 w-5" /> Reading Club</h1>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span>{club.session?.displayName}{club.session?.role === 'owner' ? ' · owner' : ''}</span>
+          <Button variant="ghost" size="sm" onClick={showRecoveryCode}><KeyRound className="h-4 w-4" /> <span className="hidden sm:inline">Recovery code</span></Button>
           <Button variant="ghost" size="sm" onClick={handleSignOut}><LogOut className="h-4 w-4" /> Sign out</Button>
         </div>
       </div>
