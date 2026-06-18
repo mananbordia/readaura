@@ -20,11 +20,10 @@ export type ClubLink = {
   mine: boolean;
 };
 
-// Publish a local doc as a content-hash snapshot. For docx/txt pass the rendered
-// (data-tts-index-tagged) HTML the viewer already holds; for pdf the bytes are
-// read from storage. Reuses my logicalId to UPDATE; if the doc was OPENED from
-// someone else it forks to a new logicalId (the backend also rejects non-author
-// updates as a safety net).
+// Publish (or update) a local doc as a content-hash snapshot. For docx/txt pass
+// the rendered (data-tts-index-tagged) HTML the viewer already holds; for pdf
+// the bytes are read from storage. Reuses my logicalId to UPDATE my own doc;
+// publishing a doc opened from the club is rejected (no forking).
 export async function publishLocalDoc(opts: {
   session: ClubSession;
   doc: Document;
@@ -32,8 +31,11 @@ export async function publishLocalDoc(opts: {
 }): Promise<void> {
   const { session, doc, snapshotHtml } = opts;
   const existing = await getClubDocByLocalId(doc.id);
-  const updating = existing?.mine === true;
-  const logicalId = updating ? existing.logicalId : crypto.randomUUID();
+  // No forking: a doc opened from the club stays a read-only local copy.
+  if (existing && !existing.mine) {
+    throw new Error('This document was opened from the club — it stays a local copy.');
+  }
+  const logicalId = existing ? existing.logicalId : crypto.randomUUID();
 
   let contentHash: string;
   if (doc.fileType === 'pdf') {

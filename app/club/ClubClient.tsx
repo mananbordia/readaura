@@ -3,17 +3,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  BookOpen, Check, Copy, Download, Globe, Loader2, LogOut, RefreshCw, Trash2, UserPlus,
+  BookOpen, BookUp, Check, Copy, Download, Globe, Loader2, LogOut, RefreshCw, Trash2, UserPlus,
 } from 'lucide-react';
 import type { PublishedDocDTO } from '@/shared/club-types';
+import type { Document } from '@/lib/types';
 import { useClub } from '@/lib/use-club';
 import { clubApi } from '@/lib/club/api';
 import { openClubDoc, unpublishDoc, type ClubLink } from '@/lib/club/actions';
-import { listClubDocs } from '@/lib/storage';
+import { listClubDocs, listDocuments } from '@/lib/storage';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 
 type Tab = 'discover' | 'mine' | 'members';
 
@@ -43,7 +47,18 @@ export default function ClubClient() {
   const [mintedInvite, setMintedInvite] = useState<string | null>(null);
   const [inviteCopied, setInviteCopied] = useState(false);
 
+  // Publish-a-document picker
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [localDocs, setLocalDocs] = useState<Document[]>([]);
+
   const linkByLogical = new Map(links.map((l) => [l.logicalId, l] as const));
+  const mineLocalIds = new Set(links.filter((l) => l.mine && l.localDocumentId).map((l) => l.localDocumentId as string));
+  const foreignLocalIds = new Set(links.filter((l) => !l.mine && l.localDocumentId).map((l) => l.localDocumentId as string));
+
+  const openPublishPicker = async () => {
+    try { setLocalDocs(await listDocuments()); } catch { /* ignore */ }
+    setPublishOpen(true);
+  };
 
   const refresh = useCallback(async () => {
     const token = club.session?.token;
@@ -212,7 +227,10 @@ export default function ClubClient() {
             {t.label}
           </button>
         ))}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-1">
+          <Button size="sm" onClick={openPublishPicker}>
+            <BookUp className="h-4 w-4" /> <span className="hidden sm:inline">Publish a document</span>
+          </Button>
           <Button variant="ghost" size="sm" onClick={refresh} disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </Button>
@@ -301,6 +319,44 @@ export default function ClubClient() {
           </div>
         )}
       </div>
+
+      <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Publish a document</DialogTitle>
+            <DialogDescription>
+              Pick a document from your library — it opens in the reader, where you publish or update it.
+            </DialogDescription>
+          </DialogHeader>
+          {localDocs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Your library is empty — add a document first.</p>
+          ) : (
+            <ul className="flex max-h-80 flex-col gap-1 overflow-auto">
+              {localDocs.map((d) => {
+                const foreign = foreignLocalIds.has(d.id);
+                const published = mineLocalIds.has(d.id);
+                return (
+                  <li key={d.id}>
+                    <button
+                      disabled={foreign}
+                      onClick={() => { setPublishOpen(false); router.push(`/library?doc=${d.id}`); }}
+                      className="flex w-full items-center justify-between gap-2 rounded-md border border-border p-2.5 text-left hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium">{d.title}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {d.fileType.toUpperCase()}{published ? ' · in club' : foreign ? ' · opened from club' : ''}
+                        </span>
+                      </span>
+                      <BookUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </DialogContent>
+      </Dialog>
     </>,
   );
 }

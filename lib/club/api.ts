@@ -9,11 +9,16 @@ import type {
   PublishedDocDTO,
   RecoverResponse,
 } from '@/shared/club-types';
+import { writeClubSession } from '@/lib/use-club';
 
 const BASE = '/api/club';
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
+    // A 401 means the token was rejected (expired, or the account was removed
+    // server-side). Drop the stale session so the UI re-prompts to join/recover
+    // instead of looping on a broken credential.
+    if (res.status === 401) writeClubSession(null);
     let msg = `HTTP ${res.status}`;
     try {
       const body = await res.json();
