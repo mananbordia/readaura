@@ -1276,7 +1276,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                 </h1>
                 <p className="text-sm text-muted-foreground">
                   {hubView === 'library'
-                    ? `${visibleDocuments.length} document${visibleDocuments.length === 1 ? '' : 's'}`
+                    ? `Private to you · ${visibleDocuments.length} document${visibleDocuments.length === 1 ? '' : 's'}`
                     : hubView === 'discover'
                     ? 'Documents shared in your club.'
                     : 'Invite people and manage your club.'}
