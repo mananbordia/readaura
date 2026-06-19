@@ -1495,7 +1495,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                                 className="flex-1"
                               />
                               <div className="min-w-[200px] flex-1">
-                                <TagInput value={editTags} onChange={setEditTags} suggestions={allTags} placeholder="Add tags…" />
+                                <TagInput value={editTags} onChange={setEditTags} suggestions={allTags} placeholder="Add tags…" portalMenu />
                               </div>
                               <div className="flex gap-1">
                                 <Button size="sm" onClick={saveEdit}><Save className="h-3.5 w-3.5" /> Save</Button>
