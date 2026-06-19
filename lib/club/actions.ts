@@ -10,7 +10,7 @@ import { sha256Hex } from './hash';
 import { sanitizeClubHtml } from './sanitize';
 import {
   createDocument, getClubDocByLocalId, getClubDocByLogicalId, getDocument, getFile,
-  putClubDoc, replaceFile, setHtmlOverride,
+  listClubDocs, putClubDoc, replaceFile, setHtmlOverride,
 } from '@/lib/storage';
 
 export type ClubLink = {
@@ -136,4 +136,17 @@ export async function openClubDoc(opts: { session: ClubSession; dto: PublishedDo
 
 export async function unpublishDoc(opts: { session: ClubSession; logicalId: string }): Promise<void> {
   await clubApi.unpublish(opts.session.token, opts.logicalId);
+}
+
+// Local ids of docs I've published that are STILL live in the club (present in
+// discover, authored by me). Drives the "Published" badge: an unpublished doc
+// drops off even though its local link is kept around for re-publishing.
+export async function listMyLivePublishedLocalIds(session: ClubSession): Promise<string[]> {
+  const [discovered, links] = await Promise.all([clubApi.discover(session.token), listClubDocs()]);
+  const liveMine = new Set(
+    discovered.filter((d) => d.publisherId === session.userId).map((d) => d.logicalId),
+  );
+  return links
+    .filter((l) => l.localDocumentId && liveMine.has(l.logicalId))
+    .map((l) => l.localDocumentId as string);
 }
