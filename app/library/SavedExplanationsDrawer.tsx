@@ -8,6 +8,7 @@ import { listExplanations, deleteExplanation } from '@/lib/storage';
 import { timeAgo } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet';
@@ -75,7 +76,17 @@ export default function SavedExplanationsDrawer({ documentId, refreshKey, open, 
         <ScrollArea className="flex-1">
           <div className="p-4">
             {loading && explanations.length === 0 && (
-              <div className="text-sm text-muted-foreground">Loading…</div>
+              <ul className="space-y-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <li key={i} className="rounded-md border border-border px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <Skeleton className="h-4 flex-1" />
+                      <Skeleton className="h-4 w-6 rounded-full" />
+                      <Skeleton className="h-3 w-10" />
+                    </div>
+                  </li>
+                ))}
+              </ul>
             )}
             {!loading && explanations.length === 0 && (!shared || shared.length === 0) && (
               <div className="rounded-md border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">

@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -238,7 +239,23 @@ export default function ClubClient() {
   );
 
   if (!club.hydrated) {
-    return shell(<div className="flex justify-center py-16"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>);
+    return shell(
+      <>
+        <div className="flex items-center justify-between gap-2">
+          <Skeleton className="h-7 w-44" />
+          <Skeleton className="h-8 w-24" />
+        </div>
+        <div className="mt-4 flex gap-2 border-b border-border pb-3">
+          <Skeleton className="h-8 w-20" />
+          <Skeleton className="h-8 w-28" />
+        </div>
+        <div className="mt-4 flex flex-col gap-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-[58px] w-full rounded-md" />
+          ))}
+        </div>
+      </>,
+    );
   }
 
   // Blocking recovery-code gate (shown once after join/recover).
@@ -341,7 +358,13 @@ export default function ClubClient() {
 
       <div className="mt-4">
         {tab === 'discover' && (
-          docs.length === 0 && !loading
+          loading && docs.length === 0
+            ? <div className="flex flex-col gap-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-[58px] w-full rounded-md" />
+                ))}
+              </div>
+            : docs.length === 0
             ? <p className="text-sm text-muted-foreground">Nothing published yet.</p>
             : <ul className="flex flex-col gap-2">
                 {docs.map((d) => {

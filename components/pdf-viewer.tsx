@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { Loader2 } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { cn } from '@/lib/utils';
+import { Skeleton } from '@/components/ui/skeleton';
 
 // Host the worker on the unpkg CDN. We pin to the installed pdfjs-dist version
 // to stay in sync. For air-gapped self-hosting, swap this for a local path
@@ -50,8 +50,13 @@ export function PdfViewer({ url, className }: Props) {
         onLoadSuccess={({ numPages }) => setNumPages(numPages)}
         onLoadError={err => setError(err?.message ?? 'Failed to load PDF.')}
         loading={
-          <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading PDF…
+          <div className="w-full max-w-[800px] space-y-3.5 py-6">
+            <Skeleton className="mb-2 h-8 w-1/2" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-11/12" />
+            <Skeleton className="h-4 w-10/12" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-9/12" />
           </div>
         }
         error={
