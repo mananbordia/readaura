@@ -27,6 +27,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Skeleton, ReaderSkeleton } from '@/components/ui/skeleton';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -65,11 +66,7 @@ const PdfViewer = dynamic(
   () => import('@/components/pdf-viewer').then(m => m.PdfViewer),
   {
     ssr: false,
-    loading: () => (
-      <div className="flex h-40 items-center justify-center rounded-lg border border-border bg-card text-sm text-muted-foreground">
-        Loading PDF renderer…
-      </div>
-    ),
+    loading: () => <ReaderSkeleton />,
   },
 );
 
@@ -1237,7 +1234,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
               <LibrarySyncCard onSynced={() => { listDocuments().then(setDocuments); }} />
             )}
 
-            {!libraryIsEmpty && (
+            {docsLoaded && !libraryIsEmpty && (
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
                 <div className="relative flex-1">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -1306,7 +1303,19 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
               </div>
             )}
 
-            {libraryIsEmpty ? (
+            {!docsLoaded ? (
+              <div className="overflow-hidden rounded-lg border border-border">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 border-t border-border p-3 first:border-t-0">
+                    <Skeleton className="h-4 w-4 shrink-0" />
+                    <Skeleton className="h-4 w-4 shrink-0" />
+                    <Skeleton className="h-4 w-1/3" />
+                    <Skeleton className="ml-auto hidden h-4 w-10 sm:block" />
+                    <Skeleton className="hidden h-4 w-16 md:block" />
+                  </div>
+                ))}
+              </div>
+            ) : libraryIsEmpty ? (
               <Card className="mt-4 border-dashed">
                 <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
                   <div className="rounded-full bg-muted p-3">
@@ -1531,9 +1540,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                 {pdfObjectUrl ? (
                   <PdfViewer url={pdfObjectUrl} />
                 ) : (
-                  <div className="flex items-center justify-center rounded-lg border border-border bg-card p-12 text-sm text-muted-foreground">
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading PDF…
-                  </div>
+                  <ReaderSkeleton />
                 )}
               </div>
             ) : (
@@ -1572,9 +1579,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center justify-center rounded-lg border border-border bg-card p-12 text-sm text-muted-foreground">
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading document…
-                </div>
+                <ReaderSkeleton />
               )
             )}
           </>
