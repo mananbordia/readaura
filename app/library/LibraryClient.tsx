@@ -56,6 +56,9 @@ const PublishToClubButton = CLUB_BUILD
 // an `if (CLUB_BUILD)` block still emits a (non-whitelisted) chunk and trips the
 // flag-off parity gate.
 const loadClubShare = CLUB_BUILD ? () => import('@/lib/club/share') : null;
+const LibrarySyncCard = CLUB_BUILD
+  ? dynamic(() => import('./LibrarySyncCard'), { ssr: false })
+  : null;
 
 // PDF.js touches DOMMatrix at module load — defer to client-only.
 const PdfViewer = dynamic(
@@ -875,6 +878,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docsLoaded]);
 
+
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!(e.metaKey || e.ctrlKey)) return;
     const k = e.key.toLowerCase();
@@ -1227,6 +1231,10 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
               <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                 {error}
               </div>
+            )}
+
+            {LibrarySyncCard && (
+              <LibrarySyncCard onSynced={() => { listDocuments().then(setDocuments); }} />
             )}
 
             {!libraryIsEmpty && (

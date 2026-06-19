@@ -10,15 +10,32 @@ import {
   parseRecoveryCode,
   verifySecret,
 } from '../lib/auth';
+import { requireMember, type MemberVars } from '../middleware/auth';
 import type {
   JoinRequest,
   JoinResponse,
   MemberRole,
   RecoverRequest,
   RecoverResponse,
+  RegenerateRecoveryResponse,
 } from '../../../shared/club-types';
 
-export const authRoutes = new Hono();
+export const authRoutes = new Hono<MemberVars>();
+
+// Logged-in member regenerates their recovery code. The secret is stored
+// argon2-hashed, so we can't reveal the original — issue a fresh one (rotating
+// locator + hash) and return it once; the previous code stops working.
+authRoutes.post('/recovery', requireMember, async (c) => {
+  const userId = c.get('userId');
+  const rec = genRecoveryParts();
+  const recoveryHash = await hashSecret(rec.secret);
+  await db
+    .update(users)
+    .set({ recoveryLocator: rec.locator, recoveryHash, recoveryRotatedAt: new Date() })
+    .where(eq(users.id, userId));
+  const res: RegenerateRecoveryResponse = { recoveryCode: rec.code };
+  return c.json(res);
+});
 
 // Throttle /join to blunt brute force of the short (6-char) invite codes.
 // The Vercel proxy forwards the real client IP as x-club-client-ip, so we can

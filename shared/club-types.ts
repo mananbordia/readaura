@@ -86,6 +86,11 @@ export type JoinResponse = {
 export type RecoverRequest = { recoveryCode: string };
 export type RecoverResponse = JoinResponse;
 
+// A logged-in member regenerates their recovery code (the secret is stored
+// hashed, so the original can't be re-shown — this issues a fresh one and
+// invalidates the old). Returns the new code, shown once.
+export type RegenerateRecoveryResponse = { recoveryCode: string };
+
 // Single-use, per-member invites. An owner mints one code per member; the code
 // is consumed on join. The very first owner bootstraps from a code the server
 // prints to its logs on first start.
@@ -156,5 +161,21 @@ export type SyncPushItem = {
   /** null for deletes */
   envelope: SyncEnvelope | null;
 };
+
+// Push a batch of local changes (incl. explicit delete tombstones — deletes are
+// NEVER inferred from absence, so a fresh/recovered device can't wipe the cloud).
+export type SyncPushRequest = { items: SyncPushItem[] };
+export type SyncPushResponse = { ok: true; serverTime: string };
+
+// A row returned by pull. `envelope` is null for tombstones (deletedAt set).
+export type SyncPullRow = {
+  kind: SyncKind;
+  key: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  envelope: SyncEnvelope | null;
+};
+// `since` filters by updatedAt; echo `serverTime` back as the next cursor.
+export type SyncPullResponse = { rows: SyncPullRow[]; serverTime: string };
 
 export type ApiError = { error: string };
