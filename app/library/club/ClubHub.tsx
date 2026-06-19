@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  BookUp, Check, ChevronRight, Copy, Loader2, RefreshCw, Trash2, UserPlus,
+  BookUp, Check, ChevronRight, Copy, FileText, FileType2, Loader2, RefreshCw, Trash2, UserPlus,
 } from 'lucide-react';
 import type { InviteDTO, MemberDTO, PublishedDocDTO } from '@/shared/club-types';
 import type { Document } from '@/lib/types';
@@ -167,9 +167,14 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
   };
 
   const skeletonRows = (
-    <div className="flex flex-col gap-2">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <Skeleton key={i} className="h-[58px] w-full rounded-md" />
+    <div className="overflow-hidden rounded-lg border border-border">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 border-t border-border p-3 first:border-t-0">
+          <Skeleton className="h-4 w-4 shrink-0" />
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="ml-auto hidden h-4 w-10 sm:block" />
+          <Skeleton className="hidden h-4 w-20 md:block" />
+        </div>
       ))}
     </div>
   );
@@ -192,45 +197,63 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
           ? skeletonRows
           : docs.length === 0
           ? <p className="text-sm text-muted-foreground">Nothing published yet. Open a doc in your library and use &ldquo;Publish to club,&rdquo; or use &ldquo;Publish a document&rdquo; above.</p>
-          : <ul className="flex flex-col gap-2">
-              {docs.map((d) => {
-                const link = linkByLogical.get(d.logicalId);
-                const stale = link && link.contentHash !== d.contentHash;
-                const isBusy = busy === d.logicalId;
-                const isAuthor = d.publisherId === club.session?.userId;
-                return (
-                  <li key={d.logicalId}>
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => { if (!isBusy) open(d); }}
-                      onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !isBusy) { e.preventDefault(); open(d); } }}
-                      className="flex w-full items-start justify-between gap-3 rounded-md border border-border p-3 text-left transition-colors hover:bg-muted aria-disabled:opacity-60"
-                      aria-disabled={isBusy}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium">{d.title}</span>
-                        <span className="block text-xs text-muted-foreground">{d.fileType.toUpperCase()} · by {isAuthor ? 'you' : d.publisherName}</span>
-                        {d.tags.length > 0 && <span className="mt-1 flex flex-wrap gap-1">{d.tags.map((t) => <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>)}</span>}
-                      </span>
-                      <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-                        {stale && <Badge variant="default" className="text-[10px]">Update</Badge>}
-                        {isAuthor && (
-                          <Button
-                            size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10"
-                            title="Unpublish" aria-label="Unpublish" disabled={isBusy}
-                            onClick={(e) => { e.stopPropagation(); run(d.logicalId, () => unpublishDoc({ session: club.session!, logicalId: d.logicalId })); }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                        {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
-                      </span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+          : <div className="overflow-hidden rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="p-2 text-left sm:p-3">Title</th>
+                    <th className="hidden p-3 text-left sm:table-cell">Type</th>
+                    <th className="hidden p-3 text-left md:table-cell">By</th>
+                    <th className="hidden p-3 text-left lg:table-cell">Tags</th>
+                    <th className="p-2 text-right sm:p-3">&nbsp;</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {docs.map((d) => {
+                    const link = linkByLogical.get(d.logicalId);
+                    const stale = link && link.contentHash !== d.contentHash;
+                    const isBusy = busy === d.logicalId;
+                    const isAuthor = d.publisherId === club.session?.userId;
+                    return (
+                      <tr
+                        key={d.logicalId}
+                        onClick={() => { if (!isBusy) open(d); }}
+                        className={`border-t border-border transition-colors hover:bg-muted/30 ${isBusy ? 'opacity-60' : 'cursor-pointer'}`}
+                      >
+                        <td className="p-2 font-medium sm:p-3">
+                          <div className="flex min-w-0 items-center gap-2">
+                            {d.fileType === 'pdf' ? <FileType2 className="h-4 w-4 shrink-0 text-muted-foreground" /> : <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                            <span className="truncate">{d.title}</span>
+                          </div>
+                        </td>
+                        <td className="hidden p-3 text-muted-foreground sm:table-cell">{d.fileType.toUpperCase()}</td>
+                        <td className="hidden p-3 text-muted-foreground md:table-cell">{isAuthor ? 'you' : d.publisherName}</td>
+                        <td className="hidden p-3 lg:table-cell">
+                          <div className="flex flex-wrap gap-1">
+                            {d.tags.map((t) => <Badge key={t} variant="secondary" className="font-normal">{t}</Badge>)}
+                          </div>
+                        </td>
+                        <td className="p-2 text-right sm:p-3">
+                          <div className="flex items-center justify-end gap-2">
+                            {stale && <Badge variant="default" className="text-[10px]">Update</Badge>}
+                            {isAuthor && (
+                              <Button
+                                size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10"
+                                title="Unpublish" aria-label="Unpublish" disabled={isBusy}
+                                onClick={(e) => { e.stopPropagation(); run(d.logicalId, () => unpublishDoc({ session: club.session!, logicalId: d.logicalId })); }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                            {isBusy ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
       )}
 
       {view === 'members' && club.session?.role === 'owner' && (
