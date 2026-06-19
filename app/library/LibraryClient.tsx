@@ -1,11 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
 import type { UIMessage } from 'ai';
 import {
   ArrowDownUp, ArrowLeft, ClipboardPaste, FileText, FileType2, Loader2, Minus, PencilLine, Plus,
-  Save, Search, Sparkles, Tags, Trash2, Upload, X, Volume2, Pause, Play, Square, MessageSquare, Users,
+  Save, Search, Sparkles, Tags, Trash2, Upload, X, Volume2, Pause, Play, Square, MessageSquare, Users, Globe,
 } from 'lucide-react';
 import type { Document, FileType, SavedExplanation } from '@/lib/types';
 import {
@@ -16,6 +15,7 @@ import { extractPdfText } from '@/lib/pdf-text';
 import { convertDocxBlobToHtml } from '@/lib/docx-html';
 import { textToHtml } from '@/lib/reader-html';
 import type { SharedExp } from '@/lib/club/share';
+import { useClub } from '@/lib/use-club';
 import ExplainPopover from './ExplainPopover';
 import SavedExplanationsDrawer from './SavedExplanationsDrawer';
 import { EditorToolbar } from '@/components/editor-toolbar';
@@ -60,6 +60,13 @@ const loadClubShare = CLUB_BUILD ? () => import('@/lib/club/share') : null;
 const LibrarySyncCard = CLUB_BUILD
   ? dynamic(() => import('./LibrarySyncCard'), { ssr: false })
   : null;
+// Club hub surfaces — Discover/Members, the join dialog, and the signed-in
+// account chrome. Dynamic-imported behind the flag so they tree-shake out of
+// the default bundle (flag-off parity). useClub (above) carries no club markers
+// and is safe to import eagerly for the signed-in/out branching.
+const ClubHub = CLUB_BUILD ? dynamic(() => import('./club/ClubHub'), { ssr: false }) : null;
+const JoinClubDialog = CLUB_BUILD ? dynamic(() => import('./club/JoinClubDialog'), { ssr: false }) : null;
+const ClubAccountControls = CLUB_BUILD ? dynamic(() => import('./club/ClubAccountControls'), { ssr: false }) : null;
 
 // PDF.js touches DOMMatrix at module load — defer to client-only.
 const PdfViewer = dynamic(
@@ -152,7 +159,14 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     return () => { cancelled = true; };
   }, []);
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
-  const router = useRouter();
+  const club = useClub();
+  // Hub view: the library list, or (signed-in) the club Discover/Members tabs.
+  const [hubView, setHubView] = useState<'library' | 'discover' | 'members'>('library');
+  const [joinOpen, setJoinOpen] = useState(false);
+  // Local ids of docs I've published (drives the "Published" badge on the list).
+  const [publishedLocalIds, setPublishedLocalIds] = useState<Set<string>>(new Set());
+  // Bumped by the club hub after publish/unpublish so the badges re-read.
+  const [clubLinksVersion, setClubLinksVersion] = useState(0);
   const [error, setError] = useState('');
   const [docxHtml, setDocxHtml] = useState('');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
@@ -602,28 +616,47 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
   // the viewer/TTS state); the deep-link effect below re-opens it on load.
   // Hoisted above handleDelete/handleView (which call it) to avoid a
   // use-before-declare lint error, same as stopTts above.
-  const syncDocUrl = useCallback((docId: string | null) => {
+  const syncDocUrl = useCallback((docId: string | null, opts?: { fromClub?: boolean }) => {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
     if (docId) url.searchParams.set('doc', docId);
     else url.searchParams.delete('doc');
+    // `from=club` lets Back return to the Discover tab after a refresh.
+    if (docId && opts?.fromClub) url.searchParams.set('from', 'club');
+    else url.searchParams.delete('from');
+    if (docId) url.searchParams.delete('tab'); // tab only matters in the list view
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   }, []);
 
-  // Close the viewer. A doc opened from the club (?from=club) returns to /club
-  // where the user came from; a doc opened from the library returns to the list.
+  // Reflect the active hub tab in the URL (so /club can redirect to
+  // /library?tab=discover and a refresh stays put). Clears any open-doc params.
+  const setTabParam = useCallback((view: 'library' | 'discover' | 'members') => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (view === 'library') url.searchParams.delete('tab');
+    else url.searchParams.set('tab', view);
+    url.searchParams.delete('doc');
+    url.searchParams.delete('from');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
+  const switchHubView = useCallback((view: 'library' | 'discover' | 'members') => {
+    setHubView(view);
+    setTabParam(view);
+  }, [setTabParam]);
+
+  // Close the viewer. A doc opened from the club (?from=club) returns to the
+  // Discover tab; a doc opened from the library returns to the list.
   const handleBack = () => {
     stopTts();
     setEditing(false);
     const fromClub = typeof window !== 'undefined'
       && new URLSearchParams(window.location.search).get('from') === 'club';
-    if (fromClub) {
-      router.push('/club');
-      return;
-    }
     setSelectedDocument(null);
     setDocxHtml('');
-    syncDocUrl(null);
+    const target = fromClub && clubEnabled ? 'discover' : 'library';
+    setHubView(target);
+    setTabParam(target); // also clears doc/from from the URL
   };
 
   const handleDelete = async (documentId: string) => {
@@ -748,10 +781,10 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     return { html: container.innerHTML, items };
   }, []);
 
-  const handleView = async (doc: Document) => {
+  const handleView = async (doc: Document, opts?: { fromClub?: boolean }) => {
     stopTts();
     setSelectedDocument(doc);
-    syncDocUrl(doc.id);
+    syncDocUrl(doc.id, opts);
     setDocxHtml('');
     ttsItemsRef.current = [];
     // Revoke any previously-created PDF object URL before we make a new one.
@@ -864,16 +897,53 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     setTimeout(() => editButtonRef.current?.focus(), 0);
   };
 
-  // Deep-link: /library?doc=<id> opens that doc directly (e.g. after opening a
-  // club doc from the /club page). Runs once after the library hydrates.
+  // Open a club doc (by its local id) in the reader, without navigating away —
+  // the club hub hands us the id after pulling/locating the local copy.
+  const openDocById = async (localId: string) => {
+    const fresh = await listDocuments().catch(() => null);
+    if (fresh) setDocuments(fresh);
+    const doc = (fresh ?? documents).find(d => d.id === localId);
+    if (doc) handleView(doc, { fromClub: true });
+  };
+
+  // Deep-link: /library?doc=<id> opens that doc directly (e.g. from a shared
+  // link or the old /club open-flow). Runs once after the library hydrates.
   useEffect(() => {
     if (!docsLoaded || typeof window === 'undefined') return;
-    const docId = new URLSearchParams(window.location.search).get('doc');
+    const params = new URLSearchParams(window.location.search);
+    const docId = params.get('doc');
     if (!docId) return;
     const target = documents.find(d => d.id === docId);
-    if (target) handleView(target);
+    if (target) handleView(target, { fromClub: params.get('from') === 'club' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docsLoaded]);
+
+  // Restore the hub tab from ?tab= once club auth hydrates (e.g. the /club
+  // redirect lands on /library?tab=discover). A doc deep-link takes precedence.
+  useEffect(() => {
+    if (!clubEnabled || !club.signedIn || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('doc')) return;
+    const tab = params.get('tab');
+    if (tab === 'discover') setHubView('discover');
+    else if (tab === 'members' && club.session?.role === 'owner') setHubView('members');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clubEnabled, club.signedIn]);
+
+  // Which local docs I've published — for the "Published" badge in the list.
+  useEffect(() => {
+    if (!clubEnabled || !club.signedIn) { setPublishedLocalIds(new Set()); return; }
+    let cancelled = false;
+    listClubDocs()
+      .then(links => {
+        if (cancelled) return;
+        setPublishedLocalIds(new Set(
+          links.filter(l => l.mine && l.localDocumentId).map(l => l.localDocumentId as string),
+        ));
+      })
+      .catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
+  }, [clubEnabled, club.signedIn, clubLinksVersion]);
 
 
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -1152,6 +1222,11 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
   // A club doc opened from someone else is read-only (no edit). Any club-linked
   // doc can have its explanations saved to the club.
   const isForeignClubDoc = selectedClubLink?.mine === false;
+  const hubTabs: { id: 'library' | 'discover' | 'members'; label: string }[] = [
+    { id: 'library', label: 'Library' },
+    { id: 'discover', label: 'Discover' },
+    ...(club.session?.role === 'owner' ? [{ id: 'members' as const, label: 'Members' }] : []),
+  ];
   const canShareToClub = selectedClubLink != null;
 
   // Upload-dialog title hints. The title is always optional; the placeholder
@@ -1194,18 +1269,54 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
         {!selectedDocument ? (
           /* ===== Library view ===== */
           <>
-            <div className="mb-6 flex items-end justify-between gap-4">
+            <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
               <div>
-                <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  {hubView === 'discover' ? 'Discover' : hubView === 'members' ? 'Members' : 'Library'}
+                </h1>
                 <p className="text-sm text-muted-foreground">
-                  {visibleDocuments.length} document{visibleDocuments.length === 1 ? '' : 's'}
+                  {hubView === 'library'
+                    ? `${visibleDocuments.length} document${visibleDocuments.length === 1 ? '' : 's'}`
+                    : hubView === 'discover'
+                    ? 'Documents shared in your club.'
+                    : 'Invite people and manage your club.'}
                 </p>
               </div>
-              <Button onClick={() => setShowUpload(true)}>
-                <Upload className="h-4 w-4" /> Upload
-              </Button>
+              <div className="flex items-center gap-2">
+                {clubEnabled && club.hydrated && !club.signedIn && (
+                  <Button variant="outline" onClick={() => setJoinOpen(true)}>
+                    <Globe className="h-4 w-4" /> <span className="hidden sm:inline">Join Club</span>
+                  </Button>
+                )}
+                {clubEnabled && club.signedIn && ClubAccountControls && (
+                  <ClubAccountControls onSignedOut={() => switchHubView('library')} />
+                )}
+                <Button onClick={() => setShowUpload(true)}>
+                  <Upload className="h-4 w-4" /> Upload
+                </Button>
+              </div>
             </div>
 
+            {clubEnabled && club.signedIn && (
+              <div className="mb-4 flex items-center gap-1 border-b border-border">
+                {hubTabs.map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => switchHubView(t.id)}
+                    className={`-mb-px border-b-2 px-3 py-2 text-sm ${hubView === t.id ? 'border-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {hubView !== 'library' ? (
+              ClubHub ? (
+                <ClubHub view={hubView} onOpenDoc={openDocById} onChanged={() => setClubLinksVersion(v => v + 1)} />
+              ) : null
+            ) : (
+            <>
             {!aiConfigured && (
               <Card className="mb-4 border-destructive/40 bg-destructive/5">
                 <CardContent className="flex items-start gap-3 p-4 text-sm">
@@ -1404,6 +1515,11 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                               <div className="flex min-w-0 items-center gap-2">
                                 {r.fileType === 'pdf' ? <FileType2 className="h-4 w-4 shrink-0 text-muted-foreground" /> : <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />}
                                 <span className="truncate">{r.title}</span>
+                                {publishedLocalIds.has(r.id) && (
+                                  <Badge variant="muted" className="shrink-0 gap-1 font-normal" title="Published to your club">
+                                    <Globe className="h-3 w-3" /> Published
+                                  </Badge>
+                                )}
                               </div>
                             </td>
                             <td className="hidden p-3 text-muted-foreground sm:table-cell">
@@ -1439,6 +1555,8 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                   </tbody>
                 </table>
               </div>
+            )}
+            </>
             )}
           </>
         ) : (
@@ -1754,6 +1872,11 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
 
       {/* Settings dialog (also reachable from the Navbar) */}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+      {/* Join / recover the club — opened from the "Join Club" header button */}
+      {clubEnabled && JoinClubDialog && (
+        <JoinClubDialog open={joinOpen} onOpenChange={setJoinOpen} onSignedIn={() => switchHubView('discover')} />
+      )}
 
       {/* Explanations sheet (only when a doc is open) */}
       {selectedDocument && (

@@ -1,0 +1,335 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import {
+  BookUp, Check, ChevronRight, Copy, Loader2, RefreshCw, Trash2, UserPlus,
+} from 'lucide-react';
+import type { InviteDTO, MemberDTO, PublishedDocDTO } from '@/shared/club-types';
+import type { Document } from '@/lib/types';
+import { useClub } from '@/lib/use-club';
+import { clubApi } from '@/lib/club/api';
+import { openClubDoc, publishLocalDoc, unpublishDoc, type ClubLink } from '@/lib/club/actions';
+import { buildDocSnapshotHtml } from '@/lib/club/snapshot';
+import { getDocument, listClubDocs, listDocuments, putClubDoc } from '@/lib/storage';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+
+// The signed-in club surface, rendered inside the library hub (not a separate
+// page). Discover + Members + the publish picker. "My published" is folded away:
+// your own docs show "by you" here (with an Unpublish action) and carry a
+// "Published" badge back in the Library tab. Opening a doc hands its local id up
+// to the hub via onOpenDoc so it opens in the same reader (no navigation).
+
+type Props = {
+  view: 'discover' | 'members';
+  onOpenDoc: (localDocId: string) => void;
+  /** Bumped after publish/unpublish so the Library tab can refresh its badges. */
+  onChanged?: () => void;
+};
+
+// "2h 14m left" / "expired" for an invite's TTL.
+function formatRemaining(expiresAt: string | null, now: number): string {
+  if (!expiresAt) return 'no expiry';
+  const ms = new Date(expiresAt).getTime() - now;
+  if (ms <= 0) return 'expired';
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  return h > 0 ? `${h}h ${m}m left` : `${m}m left`;
+}
+
+export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
+  const club = useClub();
+
+  const [docs, setDocs] = useState<PublishedDocDTO[]>([]);
+  const [links, setLinks] = useState<ClubLink[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+
+  // Members tab (owner): active invites + who's joined.
+  const [minting, setMinting] = useState(false);
+  const [invites, setInvites] = useState<InviteDTO[]>([]);
+  const [members, setMembers] = useState<MemberDTO[]>([]);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  // Publish-a-document picker
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [localDocs, setLocalDocs] = useState<Document[]>([]);
+
+  const linkByLogical = new Map(links.map((l) => [l.logicalId, l] as const));
+  const linkByLocal = new Map(
+    links.filter((l) => l.localDocumentId).map((l) => [l.localDocumentId as string, l] as const),
+  );
+  // logicalIds that still exist server-side (this refresh's discover results).
+  const liveLogicalIds = new Set(docs.map((d) => d.logicalId));
+
+  const openPublishPicker = async () => {
+    try { setLocalDocs(await listDocuments()); } catch { /* ignore */ }
+    setPublishOpen(true);
+  };
+
+  const refresh = useCallback(async () => {
+    const token = club.session?.token;
+    const myId = club.session?.userId;
+    if (!token) return;
+    setLoading(true);
+    setError('');
+    try {
+      const [discovered, localLinks] = await Promise.all([clubApi.discover(token), listClubDocs()]);
+      setDocs(discovered);
+      // Reconcile the local `mine` flag against the server's authorship so the
+      // "Published" badges (Library tab) and "by you" labels (Discover) match
+      // who actually published each doc; self-heals links that drifted.
+      const authoredByLogical = new Map(discovered.map((d) => [d.logicalId, d.publisherId === myId] as const));
+      const reconciled = await Promise.all(localLinks.map(async (r) => {
+        const authored = authoredByLogical.get(r.logicalId);
+        if (authored !== undefined && r.mine !== authored) {
+          const fixed = { ...r, mine: authored };
+          await putClubDoc(fixed);
+          return fixed;
+        }
+        return r;
+      }));
+      setLinks(reconciled.map((r) => ({
+        logicalId: r.logicalId,
+        contentHash: r.cachedContentHash,
+        localDocumentId: r.localDocumentId,
+        mine: r.mine === true,
+      })));
+      if (club.session?.role === 'owner') {
+        const [inv, mem] = await Promise.all([clubApi.listInvites(token), clubApi.listMembers(token)]);
+        setInvites(inv);
+        setMembers(mem);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load the club library.');
+    }
+    setLoading(false);
+  }, [club.session]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  // Tick so invite "remaining time" stays current (minute granularity is fine).
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const run = async (id: string, fn: () => Promise<void>) => {
+    setBusy(id); setError('');
+    try { await fn(); await refresh(); onChanged?.(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Action failed.'); }
+    setBusy(null);
+  };
+
+  // Open a discovered doc in the library reader. If we already hold a current
+  // local copy (you published it, or pulled it before) open that directly;
+  // otherwise pull it into the library, then hand the local id up to the hub.
+  const open = async (d: PublishedDocDTO) => {
+    if (!club.session) return;
+    setBusy(d.logicalId); setError('');
+    try {
+      const link = linkByLogical.get(d.logicalId);
+      const localId = link?.localDocumentId ?? null;
+      const stale = !!(link && link.contentHash !== d.contentHash);
+      const haveLocal = localId ? !!(await getDocument(localId)) : false;
+      const targetId = haveLocal && !stale ? localId! : await openClubDoc({ session: club.session, dto: d });
+      onOpenDoc(targetId); // hub swaps to the reader; leave busy set (we unmount)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to open this document.');
+      setBusy(null);
+    }
+  };
+
+  // Publish (or update) a local doc straight from the picker. Snapshot HTML is
+  // rebuilt from storage so the hash matches the in-reader publish path. For a
+  // doc that was unpublished, this reuses its logicalId and un-tombstones it.
+  const publishFromList = (d: Document) => run(`pub:${d.id}`, async () => {
+    await publishLocalDoc({ session: club.session!, doc: d, snapshotHtml: await buildDocSnapshotHtml(d) });
+  });
+
+  const mintInvite = async () => {
+    const token = club.session?.token;
+    if (!token) return;
+    setMinting(true); setError('');
+    try {
+      await clubApi.createInvite(token);
+      setInvites(await clubApi.listInvites(token));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create an invite.');
+    }
+    setMinting(false);
+  };
+
+  const skeletonRows = (
+    <div className="flex flex-col gap-2">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <Skeleton key={i} className="h-[58px] w-full rounded-md" />
+      ))}
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-end gap-1">
+        <Button size="sm" onClick={openPublishPicker}>
+          <BookUp className="h-4 w-4" /> <span className="hidden sm:inline">Publish a document</span>
+        </Button>
+        <Button variant="ghost" size="sm" onClick={refresh} disabled={loading} aria-label="Refresh">
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+        </Button>
+      </div>
+
+      {error && <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div>}
+
+      {view === 'discover' && (
+        loading && docs.length === 0
+          ? skeletonRows
+          : docs.length === 0
+          ? <p className="text-sm text-muted-foreground">Nothing published yet. Open a doc in your library and use &ldquo;Publish to club,&rdquo; or use &ldquo;Publish a document&rdquo; above.</p>
+          : <ul className="flex flex-col gap-2">
+              {docs.map((d) => {
+                const link = linkByLogical.get(d.logicalId);
+                const stale = link && link.contentHash !== d.contentHash;
+                const isBusy = busy === d.logicalId;
+                const isAuthor = d.publisherId === club.session?.userId;
+                return (
+                  <li key={d.logicalId}>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => { if (!isBusy) open(d); }}
+                      onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !isBusy) { e.preventDefault(); open(d); } }}
+                      className="flex w-full items-start justify-between gap-3 rounded-md border border-border p-3 text-left transition-colors hover:bg-muted aria-disabled:opacity-60"
+                      aria-disabled={isBusy}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{d.title}</span>
+                        <span className="block text-xs text-muted-foreground">{d.fileType.toUpperCase()} · by {isAuthor ? 'you' : d.publisherName}</span>
+                        {d.tags.length > 0 && <span className="mt-1 flex flex-wrap gap-1">{d.tags.map((t) => <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>)}</span>}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                        {stale && <Badge variant="default" className="text-[10px]">Update</Badge>}
+                        {isAuthor && (
+                          <Button
+                            size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10"
+                            title="Unpublish" aria-label="Unpublish" disabled={isBusy}
+                            onClick={(e) => { e.stopPropagation(); run(d.logicalId, () => unpublishDoc({ session: club.session!, logicalId: d.logicalId })); }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+      )}
+
+      {view === 'members' && club.session?.role === 'owner' && (
+        <div className="flex flex-col gap-6">
+          <div>
+            <p className="text-sm text-muted-foreground">Mint a single-use invite per member. Codes expire in 72h.</p>
+            <Button size="sm" className="mt-2" onClick={mintInvite} disabled={minting}>
+              {minting ? <Loader2 className="h-4 w-4 animate-spin" /> : <><UserPlus className="h-4 w-4" /> Create invite</>}
+            </Button>
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Active invites <Badge variant="muted" className="font-normal normal-case">{invites.length}</Badge>
+            </div>
+            {invites.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No active invites — create one above.</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {invites.map((inv) => (
+                  <li key={inv.id} className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <code className="rounded bg-muted px-2 py-1 font-mono text-sm tracking-wider">{inv.code}</code>
+                      <span className="text-xs text-muted-foreground">{formatRemaining(inv.expiresAt, now)}</span>
+                    </div>
+                    <Button size="sm" variant="ghost" className="shrink-0"
+                      onClick={() => { navigator.clipboard?.writeText(inv.code); setCopiedCode(inv.id); setTimeout(() => setCopiedCode(null), 1500); }}>
+                      {copiedCode === inv.id ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Members <Badge variant="muted" className="font-normal normal-case">{members.length}</Badge>
+            </div>
+            {members.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No members have joined yet.</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {members.map((m) => (
+                  <li key={m.userId} className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+                    <span className="truncate text-sm font-medium">{m.displayName}{m.role === 'owner' ? ' · owner' : ''}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">joined {new Date(m.joinedAt).toLocaleDateString()}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Publish a document</DialogTitle>
+            <DialogDescription>
+              Publish a document from your library to the club, or update one you&apos;ve already published.
+            </DialogDescription>
+          </DialogHeader>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          {localDocs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Your library is empty — add a document first.</p>
+          ) : (
+            <ul className="flex max-h-[60vh] flex-col gap-1 overflow-auto">
+              {localDocs.map((d) => {
+                const link = linkByLocal.get(d.id);
+                // Lock only docs opened from a club publication that's still live:
+                // you can't republish someone else's doc (no forking). A link to a
+                // publication that no longer exists isn't a fork — allow publishing.
+                const foreign = !!link && !link.mine && liveLogicalIds.has(link.logicalId);
+                const published = !!link && link.mine;
+                const pubBusy = busy === `pub:${d.id}`;
+                return (
+                  <li key={d.id} className="flex items-center justify-between gap-2 rounded-md border border-border p-2.5">
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">{d.title}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {d.fileType.toUpperCase()}{published ? ' · in club' : foreign ? ' · opened from club' : ''}
+                      </span>
+                    </span>
+                    {foreign ? (
+                      <span className="shrink-0 text-xs text-muted-foreground" title="Opened from the club — read-only copy.">Read-only copy</span>
+                    ) : (
+                      <Button size="sm" variant={published ? 'ghost' : 'outline'} className="shrink-0" disabled={pubBusy}
+                        onClick={() => publishFromList(d)}>
+                        {pubBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <><BookUp className="h-4 w-4" /> {published ? 'Update in club' : 'Publish to Club'}</>}
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
