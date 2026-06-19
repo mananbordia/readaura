@@ -9,7 +9,7 @@ import type { Document } from '@/lib/types';
 import { useClub } from '@/lib/use-club';
 import { clubApi } from '@/lib/club/api';
 import { openClubDoc, publishLocalDoc, unpublishDoc, type ClubLink } from '@/lib/club/actions';
-import { buildDocSnapshotHtml } from '@/lib/club/snapshot';
+import { buildDocSnapshotHtml, computeLocalContentHash } from '@/lib/club/snapshot';
 import { getDocument, listClubDocs, listDocuments, putClubDoc } from '@/lib/storage';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -71,6 +71,9 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
   // Publish-a-document picker
   const [publishOpen, setPublishOpen] = useState(false);
   const [localDocs, setLocalDocs] = useState<Document[]>([]);
+  // Local ids of my published docs that are unchanged since publish → show
+  // "Published" instead of "Update in club" (mirrors the in-reader button).
+  const [upToDateIds, setUpToDateIds] = useState<Set<string>>(new Set());
 
   // Discover search + sort (mirrors the Library list controls).
   const [search, setSearch] = useState('');
@@ -102,8 +105,21 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
     });
 
   const openPublishPicker = async () => {
-    try { setLocalDocs(await listDocuments()); } catch { /* ignore */ }
+    let docs: Document[] = [];
+    try { docs = await listDocuments(); } catch { /* ignore */ }
+    setLocalDocs(docs);
     setPublishOpen(true);
+    // Hash each of my published docs' current content; if it still matches what
+    // was published, mark it up to date (no "Update in club" needed).
+    const upToDate = new Set<string>();
+    await Promise.all(docs.map(async (d) => {
+      const link = linkByLocal.get(d.id);
+      if (!link?.mine) return;
+      try {
+        if (await computeLocalContentHash(d) === link.contentHash) upToDate.add(d.id);
+      } catch { /* if hashing fails, leave it offering the update */ }
+    }));
+    setUpToDateIds(upToDate);
   };
 
   const refresh = useCallback(async () => {
@@ -184,6 +200,7 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
   // doc that was unpublished, this reuses its logicalId and un-tombstones it.
   const publishFromList = (d: Document) => run(`pub:${d.id}`, async () => {
     await publishLocalDoc({ session: club.session!, doc: d, snapshotHtml: await buildDocSnapshotHtml(d) });
+    setUpToDateIds((prev) => new Set(prev).add(d.id)); // now matches the published content
   });
 
   const mintInvite = async () => {
@@ -412,6 +429,10 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
                     </span>
                     {foreign ? (
                       <span className="shrink-0 text-xs text-muted-foreground" title="Opened from the club — read-only copy.">Read-only copy</span>
+                    ) : published && upToDateIds.has(d.id) ? (
+                      <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground" title="Published to the club and up to date">
+                        <Check className="h-3.5 w-3.5 text-primary" /> Published
+                      </span>
                     ) : (
                       <Button size="sm" variant={published ? 'ghost' : 'outline'} className="shrink-0" disabled={pubBusy}
                         onClick={() => publishFromList(d)}>
