@@ -6,7 +6,7 @@ import { useClub } from '@/lib/use-club';
 import { clubApi } from '@/lib/club/api';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import RecoveryCodeNotice from './RecoveryCodeNotice';
 
@@ -45,7 +45,12 @@ export default function ClubAccountControls({ onSignedOut }: { onSignedOut?: () 
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) closeDialog(); }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Recovery code</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Recovery code</DialogTitle>
+            <DialogDescription className="sr-only">
+              Your reading club account recovery code.
+            </DialogDescription>
+          </DialogHeader>
           {error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : recoveryCode ? (

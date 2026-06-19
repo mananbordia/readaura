@@ -6,7 +6,7 @@ import { DefaultChatTransport, type UIMessage } from 'ai';
 import { Loader2, Save, Send, Sparkles, Square, AlertCircle, RotateCcw, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { readApiKey } from '@/lib/use-api-key';
 import { createExplanation, appendExplanationMessages } from '@/lib/storage';
 import type { SavedExplanation } from '@/lib/types';
@@ -188,6 +188,9 @@ export default function ExplainPopover({
   return (
     <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
       <DialogContent data-explain-popover className="flex h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
+        <DialogDescription className="sr-only">
+          AI chat to explain the selected document passage.
+        </DialogDescription>
         {/* Header */}
         <div className="border-b border-border p-3 pr-12">
           <DialogTitle className="flex items-center gap-2 text-sm font-medium">
