@@ -232,45 +232,47 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
 
   return (
     <div>
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-        {view === 'discover' && docs.length > 0 && (
-          <>
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by title, tag, type, or author..."
-                className="pl-8"
-              />
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="justify-start gap-2 sm:justify-between">
-                  <ArrowDownUp className="h-4 w-4" />
-                  <span>{CLUB_SORT_LABELS[sortMode]}</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Sort by</DropdownMenuLabel>
-                <DropdownMenuRadioGroup value={sortMode} onValueChange={(v) => setSortMode(v as ClubSortMode)}>
-                  <DropdownMenuRadioItem value="date-desc">Newest first</DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="date-asc">Oldest first</DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="title">Title (A–Z)</DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
-        )}
-        <div className="flex items-center gap-1 sm:ml-auto">
-          <Button size="sm" onClick={openPublishPicker}>
-            <BookUp className="h-4 w-4" /> <span className="hidden sm:inline">Publish</span>
-          </Button>
-          <Button variant="ghost" size="sm" onClick={refresh} disabled={loading} aria-label="Refresh">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          </Button>
+      {view === 'discover' && (
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+          {docs.length > 0 && (
+            <>
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search by title, tag, type, or author..."
+                  className="pl-8"
+                />
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="justify-start gap-2 sm:justify-between">
+                    <ArrowDownUp className="h-4 w-4" />
+                    <span>{CLUB_SORT_LABELS[sortMode]}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup value={sortMode} onValueChange={(v) => setSortMode(v as ClubSortMode)}>
+                    <DropdownMenuRadioItem value="date-desc">Newest first</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="date-asc">Oldest first</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="title">Title (A–Z)</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          )}
+          <div className="flex items-center gap-1 sm:ml-auto">
+            <Button size="sm" onClick={openPublishPicker}>
+              <BookUp className="h-4 w-4" /> <span className="hidden sm:inline">Publish</span>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={refresh} disabled={loading} aria-label="Refresh">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {error && <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div>}
 
@@ -365,10 +367,15 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
 
       {view === 'members' && club.session?.role === 'owner' && (
         <div className="flex flex-col gap-6">
-          <div>
-            <p className="text-sm text-muted-foreground">Mint a single-use invite per member. Codes expire in 72h.</p>
-            <Button size="sm" className="mt-2" onClick={mintInvite} disabled={minting}>
-              {minting ? <Loader2 className="h-4 w-4 animate-spin" /> : <><UserPlus className="h-4 w-4" /> Create invite</>}
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm text-muted-foreground">Mint a single-use invite per member. Codes expire in 72h.</p>
+              <Button size="sm" className="mt-2" onClick={mintInvite} disabled={minting}>
+                {minting ? <Loader2 className="h-4 w-4 animate-spin" /> : <><UserPlus className="h-4 w-4" /> Create invite</>}
+              </Button>
+            </div>
+            <Button variant="ghost" size="sm" onClick={refresh} disabled={loading} aria-label="Refresh" title="Refresh members and invites">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             </Button>
           </div>
 
