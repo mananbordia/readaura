@@ -1223,7 +1223,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
   // doc can have its explanations saved to the club.
   const isForeignClubDoc = selectedClubLink?.mine === false;
   const hubTabs: { id: 'library' | 'discover' | 'members'; label: string }[] = [
-    { id: 'library', label: 'Library' },
+    { id: 'library', label: 'Private' },
     { id: 'discover', label: 'Club' },
     ...(club.session?.role === 'owner' ? [{ id: 'members' as const, label: 'Members' }] : []),
   ];
@@ -1272,11 +1272,11 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
             <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
               <div>
                 <h1 className="text-2xl font-semibold tracking-tight">
-                  {hubView === 'discover' ? 'Club' : hubView === 'members' ? 'Members' : 'Library'}
+                  {hubView === 'discover' ? 'Club' : hubView === 'members' ? 'Members' : 'Private'}
                 </h1>
                 <p className="text-sm text-muted-foreground">
                   {hubView === 'library'
-                    ? `Private to you · ${visibleDocuments.length} document${visibleDocuments.length === 1 ? '' : 's'}`
+                    ? `Only you can see these · ${visibleDocuments.length} document${visibleDocuments.length === 1 ? '' : 's'}`
                     : hubView === 'discover'
                     ? 'Documents shared in your club.'
                     : 'Invite people and manage your club.'}
