@@ -98,10 +98,10 @@ export default function LibrarySyncCard({ onSynced, compact }: Props) {
         ) : (
           <Button
             size="sm" variant="ghost" onClick={toggle} disabled={busy}
-            title={error || 'Back up your library to your account and restore it on any device.'}
+            title={error || 'Back up your private documents to your account and restore them on any device.'}
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cloud className="h-4 w-4" />}
-            <span className="hidden sm:inline">Sync library</span>
+            <span className="hidden sm:inline">Sync Private</span>
           </Button>
         )}
       </div>
