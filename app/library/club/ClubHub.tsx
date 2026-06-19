@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  BookUp, Check, ChevronRight, Copy, FileText, FileType2, Loader2, RefreshCw, Trash2, UserPlus,
+  ArrowDownUp, BookUp, Check, ChevronRight, Copy, FileText, FileType2, Loader2, RefreshCw, Search, Trash2, UserPlus,
 } from 'lucide-react';
 import type { InviteDTO, MemberDTO, PublishedDocDTO } from '@/shared/club-types';
 import type { Document } from '@/lib/types';
@@ -14,6 +14,10 @@ import { getDocument, listClubDocs, listDocuments, putClubDoc } from '@/lib/stor
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -41,6 +45,13 @@ function formatRemaining(expiresAt: string | null, now: number): string {
   return h > 0 ? `${h}h ${m}m left` : `${m}m left`;
 }
 
+type ClubSortMode = 'date-desc' | 'date-asc' | 'title';
+const CLUB_SORT_LABELS: Record<ClubSortMode, string> = {
+  'date-desc': 'Newest first',
+  'date-asc': 'Oldest first',
+  title: 'Title (A–Z)',
+};
+
 export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
   const club = useClub();
 
@@ -61,12 +72,34 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
   const [publishOpen, setPublishOpen] = useState(false);
   const [localDocs, setLocalDocs] = useState<Document[]>([]);
 
+  // Discover search + sort (mirrors the Library list controls).
+  const [search, setSearch] = useState('');
+  const [sortMode, setSortMode] = useState<ClubSortMode>('date-desc');
+
   const linkByLogical = new Map(links.map((l) => [l.logicalId, l] as const));
   const linkByLocal = new Map(
     links.filter((l) => l.localDocumentId).map((l) => [l.localDocumentId as string, l] as const),
   );
   // logicalIds that still exist server-side (this refresh's discover results).
   const liveLogicalIds = new Set(docs.map((d) => d.logicalId));
+
+  // Discover list after search + sort. `.filter` returns a fresh array, so the
+  // subsequent `.sort` never mutates `docs`.
+  const filteredDocs = docs
+    .filter((d) => {
+      const q = search.trim().toLowerCase();
+      if (!q) return true;
+      return d.title.toLowerCase().includes(q)
+        || d.fileType.toLowerCase().includes(q)
+        || d.publisherName.toLowerCase().includes(q)
+        || d.tags.some((t) => t.toLowerCase().includes(q));
+    })
+    .sort((a, b) => {
+      if (sortMode === 'title') return a.title.localeCompare(b.title);
+      const ta = new Date(a.publishedAt).getTime();
+      const tb = new Date(b.publishedAt).getTime();
+      return sortMode === 'date-asc' ? ta - tb : tb - ta;
+    });
 
   const openPublishPicker = async () => {
     try { setLocalDocs(await listDocuments()); } catch { /* ignore */ }
@@ -197,19 +230,52 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
           ? skeletonRows
           : docs.length === 0
           ? <p className="text-sm text-muted-foreground">Nothing published yet. Open a doc in your library and use &ldquo;Publish to club,&rdquo; or use &ldquo;Publish a document&rdquo; above.</p>
-          : <div className="overflow-hidden rounded-lg border border-border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
-                  <tr>
-                    <th className="p-2 text-left sm:p-3">Title</th>
-                    <th className="hidden p-3 text-left sm:table-cell">Type</th>
-                    <th className="hidden p-3 text-left md:table-cell">By</th>
-                    <th className="hidden p-3 text-left lg:table-cell">Tags</th>
-                    <th className="p-2 text-right sm:p-3">&nbsp;</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {docs.map((d) => {
+          : <>
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="relative flex-1">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search by title, tag, type, or author..."
+                    className="pl-8"
+                  />
+                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="justify-start gap-2 sm:justify-between">
+                      <ArrowDownUp className="h-4 w-4" />
+                      <span>{CLUB_SORT_LABELS[sortMode]}</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+                    <DropdownMenuRadioGroup value={sortMode} onValueChange={(v) => setSortMode(v as ClubSortMode)}>
+                      <DropdownMenuRadioItem value="date-desc">Newest first</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="date-asc">Oldest first</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="title">Title (A–Z)</DropdownMenuRadioItem>
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              {filteredDocs.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
+                  No documents match the current filter.
+                </div>
+              ) : (
+              <div className="overflow-hidden rounded-lg border border-border">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+                    <tr>
+                      <th className="p-2 text-left sm:p-3">Title</th>
+                      <th className="hidden p-3 text-left sm:table-cell">Type</th>
+                      <th className="hidden p-3 text-left md:table-cell">By</th>
+                      <th className="hidden p-3 text-left lg:table-cell">Tags</th>
+                      <th className="p-2 text-right sm:p-3">&nbsp;</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDocs.map((d) => {
                     const link = linkByLogical.get(d.logicalId);
                     const stale = link && link.contentHash !== d.contentHash;
                     const isBusy = busy === d.logicalId;
@@ -251,9 +317,11 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                  </tbody>
+                </table>
+              </div>
+              )}
+            </>
       )}
 
       {view === 'members' && club.session?.role === 'owner' && (
