@@ -57,6 +57,7 @@ const PublishToClubButton = CLUB_BUILD
 // an `if (CLUB_BUILD)` block still emits a (non-whitelisted) chunk and trips the
 // flag-off parity gate.
 const loadClubShare = CLUB_BUILD ? () => import('@/lib/club/share') : null;
+const loadClubActions = CLUB_BUILD ? () => import('@/lib/club/actions') : null;
 const LibrarySyncCard = CLUB_BUILD
   ? dynamic(() => import('./LibrarySyncCard'), { ssr: false })
   : null;
@@ -930,19 +931,20 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clubEnabled, club.signedIn]);
 
-  // Which local docs I've published — for the "Published" badge in the list.
+  // Which local docs are CURRENTLY published-by-me and live in the club — drives
+  // the "Published" badge. Uses discover (the live set) rather than the local
+  // link's `mine` flag, so an unpublished doc stops showing as published even
+  // though its link is kept around for re-publishing.
   useEffect(() => {
-    if (!clubEnabled || !club.signedIn) { setPublishedLocalIds(new Set()); return; }
+    if (!clubEnabled || !club.signedIn || !loadClubActions || !club.session) { setPublishedLocalIds(new Set()); return; }
     let cancelled = false;
-    listClubDocs()
-      .then(links => {
-        if (cancelled) return;
-        setPublishedLocalIds(new Set(
-          links.filter(l => l.mine && l.localDocumentId).map(l => l.localDocumentId as string),
-        ));
-      })
-      .catch(() => { /* ignore */ });
+    const session = club.session;
+    loadClubActions()
+      .then(m => m.listMyLivePublishedLocalIds(session))
+      .then(ids => { if (!cancelled) setPublishedLocalIds(new Set(ids)); })
+      .catch(() => { /* offline / backend down → just no badges */ });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clubEnabled, club.signedIn, clubLinksVersion]);
 
 

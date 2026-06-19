@@ -115,7 +115,7 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
     const upToDate = new Set<string>();
     await Promise.all(docs.map(async (d) => {
       const link = linkByLocal.get(d.id);
-      if (!link?.mine) return;
+      if (!link?.mine || !liveLogicalIds.has(link.logicalId)) return;
       try {
         if (await computeLocalContentHash(d) === link.contentHash) upToDate.add(d.id);
       } catch { /* if hashing fails, leave it offering the update */ }
@@ -435,7 +435,7 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
                 // you can't republish someone else's doc (no forking). A link to a
                 // publication that no longer exists isn't a fork — allow publishing.
                 const foreign = !!link && !link.mine && liveLogicalIds.has(link.logicalId);
-                const published = !!link && link.mine;
+                const published = !!link && link.mine && liveLogicalIds.has(link.logicalId);
                 const pubBusy = busy === `pub:${d.id}`;
                 return (
                   <li key={d.id} className="flex items-center justify-between gap-2 rounded-md border border-border p-2.5">
