@@ -13,6 +13,7 @@ import { buildDocSnapshotHtml, computeLocalContentHash } from '@/lib/club/snapsh
 import { getDocument, listClubDocs, listDocuments, putClubDoc } from '@/lib/storage';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import {
@@ -277,7 +278,24 @@ export default function ClubHub({ view, onOpenDoc, onChanged }: Props) {
         loading && docs.length === 0
           ? skeletonRows
           : docs.length === 0
-          ? <p className="text-sm text-muted-foreground">Nothing published yet. Open a doc in your library and use &ldquo;Publish to club,&rdquo; or use &ldquo;Publish a document&rdquo; above.</p>
+          ? (
+            <Card className="border-dashed">
+              <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+                <div className="rounded-full bg-muted p-3">
+                  <BookUp className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <div>
+                  <div className="font-medium">Nothing published yet</div>
+                  <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+                    Publish a document from your library to share it with the club. Your private docs stay private until you do.
+                  </p>
+                </div>
+                <Button size="sm" onClick={openPublishPicker}>
+                  <BookUp className="h-4 w-4" /> Publish a document
+                </Button>
+              </CardContent>
+            </Card>
+          )
           : <>
               {filteredDocs.length === 0 ? (
                 <div className="rounded-md border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
