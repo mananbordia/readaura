@@ -28,6 +28,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton, ReaderSkeleton } from '@/components/ui/skeleton';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -164,6 +165,8 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
   // Hub view: the library list, or (signed-in) the club Discover/Members tabs.
   const [hubView, setHubView] = useState<'library' | 'discover' | 'members'>('library');
   const [joinOpen, setJoinOpen] = useState(false);
+  // Pending type-to-confirm deletion (single row or bulk selection).
+  const [pendingDelete, setPendingDelete] = useState<{ ids: string[]; label: string } | null>(null);
   // Local ids of docs I've published (drives the "Published" badge on the list).
   const [publishedLocalIds, setPublishedLocalIds] = useState<Set<string>>(new Set());
   // Bumped by the club hub after publish/unpublish so the badges re-read.
@@ -660,15 +663,18 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     setTabParam(target); // also clears doc/from from the URL
   };
 
-  const handleDelete = async (documentId: string) => {
-    await deleteDocument(documentId);
-    setDocuments(prev => prev.filter(r => r.id !== documentId));
-    setBulkSelected(prev => { const n = new Set(prev); n.delete(documentId); return n; });
-    if (selectedDocument?.id === documentId) {
+  // Actually delete (run after the type-to-confirm dialog). Re-lists from
+  // storage so single + bulk stay consistent.
+  const performDelete = async (ids: string[]) => {
+    await Promise.all(ids.map(id => deleteDocument(id)));
+    setDocuments(await listDocuments());
+    setBulkSelected(prev => { const n = new Set(prev); ids.forEach(id => n.delete(id)); return n; });
+    if (selectedDocument && ids.includes(selectedDocument.id)) {
       setSelectedDocument(null);
       setDocxHtml('');
       stopTts();
       syncDocUrl(null);
+      setHubView('library');
     }
   };
 
@@ -713,13 +719,10 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
     setBulkTagOpen(false);
   };
 
-  const bulkDelete = async () => {
+  const bulkDelete = () => {
     const ids = Array.from(bulkSelected);
     if (ids.length === 0) return;
-    if (!confirm(`Delete ${ids.length} document${ids.length === 1 ? '' : 's'}? This can't be undone.`)) return;
-    await Promise.all(ids.map(id => deleteDocument(id)));
-    setDocuments(await listDocuments());
-    setBulkSelected(new Set());
+    setPendingDelete({ ids, label: `${ids.length} document${ids.length === 1 ? '' : 's'}` });
   };
 
   // ---- TTS plumbing (unchanged behavior) ----
@@ -1546,7 +1549,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                                 <Button size="icon-sm" variant="ghost" onClick={() => startEdit(r)} aria-label="Edit">
                                   <PencilLine className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button size="icon-sm" variant="ghost" onClick={() => handleDelete(r.id)} aria-label="Delete" className="text-destructive hover:bg-destructive/10">
+                                <Button size="icon-sm" variant="ghost" onClick={() => setPendingDelete({ ids: [r.id], label: r.title })} aria-label="Delete" className="text-destructive hover:bg-destructive/10">
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
                               </div>
@@ -1879,6 +1882,26 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
       {/* Join / recover the club — opened from the "Join Club" header button */}
       {clubEnabled && JoinClubDialog && (
         <JoinClubDialog open={joinOpen} onOpenChange={setJoinOpen} onSignedIn={() => switchHubView('discover')} />
+      )}
+
+      {/* Type-to-confirm deletion for private documents (local-only, unrecoverable) */}
+      {pendingDelete && (
+        <ConfirmDialog
+          open
+          onOpenChange={(o) => { if (!o) setPendingDelete(null); }}
+          title={pendingDelete.ids.length > 1 ? `Delete ${pendingDelete.label}?` : 'Delete document?'}
+          description={
+            <>
+              This permanently deletes{' '}
+              {pendingDelete.ids.length > 1
+                ? <strong>{pendingDelete.label}</strong>
+                : <>&ldquo;<strong>{pendingDelete.label}</strong>&rdquo;</>}
+              {' '}from this device. Private documents aren&apos;t backed up unless sync is on, so this can&apos;t be undone.
+            </>
+          }
+          confirmLabel={pendingDelete.ids.length > 1 ? `Delete ${pendingDelete.ids.length}` : 'Delete'}
+          onConfirm={() => performDelete(pendingDelete.ids)}
+        />
       )}
 
       {/* Explanations sheet (only when a doc is open) */}
