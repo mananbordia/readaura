@@ -315,7 +315,7 @@ export default function ClubClient() {
         <h1 className="flex items-center gap-2 text-xl font-semibold"><Globe className="h-5 w-5" /> Reading Club</h1>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span>{club.session?.displayName}{club.session?.role === 'owner' ? ' · owner' : ''}</span>
-          <Button variant="ghost" size="sm" onClick={showRecoveryCode}><KeyRound className="h-4 w-4" /> <span className="hidden sm:inline">Recovery code</span></Button>
+          <Button variant="ghost" size="icon-sm" onClick={showRecoveryCode} title="Recovery code" aria-label="Recovery code"><KeyRound className="h-4 w-4" /></Button>
           <Button variant="ghost" size="sm" onClick={handleSignOut}><LogOut className="h-4 w-4" /> Sign out</Button>
         </div>
       </div>
