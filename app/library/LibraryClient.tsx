@@ -1224,7 +1224,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
   const isForeignClubDoc = selectedClubLink?.mine === false;
   const hubTabs: { id: 'library' | 'discover' | 'members'; label: string }[] = [
     { id: 'library', label: 'Library' },
-    { id: 'discover', label: 'Discover' },
+    { id: 'discover', label: 'Club' },
     ...(club.session?.role === 'owner' ? [{ id: 'members' as const, label: 'Members' }] : []),
   ];
   const canShareToClub = selectedClubLink != null;
@@ -1272,7 +1272,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
             <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
               <div>
                 <h1 className="text-2xl font-semibold tracking-tight">
-                  {hubView === 'discover' ? 'Discover' : hubView === 'members' ? 'Members' : 'Library'}
+                  {hubView === 'discover' ? 'Club' : hubView === 'members' ? 'Members' : 'Library'}
                 </h1>
                 <p className="text-sm text-muted-foreground">
                   {hubView === 'library'
@@ -1308,6 +1308,11 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                     {t.label}
                   </button>
                 ))}
+                {LibrarySyncCard && (
+                  <div className="ml-auto pl-2">
+                    <LibrarySyncCard compact onSynced={() => { listDocuments().then(setDocuments); }} />
+                  </div>
+                )}
               </div>
             )}
 
@@ -1339,10 +1344,6 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
               <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                 {error}
               </div>
-            )}
-
-            {LibrarySyncCard && (
-              <LibrarySyncCard onSynced={() => { listDocuments().then(setDocuments); }} />
             )}
 
             {docsLoaded && !libraryIsEmpty && (

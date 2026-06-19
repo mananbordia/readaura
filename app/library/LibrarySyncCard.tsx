@@ -11,9 +11,13 @@ import { Button } from '@/components/ui/button';
 // Opt-in, account-level library sync. Dynamic-imported behind the club build
 // flag (the engine talks to the club backend), so it never ships in the
 // flag-off bundle. Renders nothing unless the user is signed in to the club.
-type Props = { onSynced?: () => void };
+type Props = {
+  onSynced?: () => void;
+  /** Inline form (status + icon buttons, no card chrome) for the tab-bar row. */
+  compact?: boolean;
+};
 
-export default function LibrarySyncCard({ onSynced }: Props) {
+export default function LibrarySyncCard({ onSynced, compact }: Props) {
   const club = useClub();
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -73,6 +77,36 @@ export default function LibrarySyncCard({ onSynced }: Props) {
     }
     setBusy(false);
   };
+
+  // Inline form for the tab-bar row: just status + controls, no card.
+  if (compact) {
+    return (
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        {enabled ? (
+          <>
+            <span className="mr-0.5 hidden items-center gap-1 md:inline-flex">
+              <Cloud className="h-3.5 w-3.5 text-primary" />
+              {busy ? 'Syncing…'
+                : error ? <span className="text-destructive" title={error}>Sync failed</span>
+                : lastSynced ? `Synced ${timeAgo(lastSynced)}` : 'Synced'}
+            </span>
+            <Button size="icon-sm" variant="ghost" onClick={runSyncNow} disabled={busy} title="Sync now" aria-label="Sync now">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={toggle} disabled={busy}>Turn off</Button>
+          </>
+        ) : (
+          <Button
+            size="sm" variant="ghost" onClick={toggle} disabled={busy}
+            title={error || 'Back up your library to your account and restore it on any device.'}
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cloud className="h-4 w-4" />}
+            <span className="hidden sm:inline">Sync library</span>
+          </Button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="mb-4 rounded-lg border border-border p-3">
