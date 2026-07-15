@@ -1462,7 +1462,7 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                 No documents match the current filter.
               </div>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-border">
+              <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
                     <tr>
@@ -1520,7 +1520,12 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                             <td className="p-2 font-medium sm:p-3">
                               <div className="flex min-w-0 items-center gap-2">
                                 {r.fileType === 'pdf' ? <FileType2 className="h-4 w-4 shrink-0 text-muted-foreground" /> : <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />}
-                                <span className="truncate">{r.title}</span>
+                                <span
+                                  className="block max-w-[180px] truncate sm:max-w-[240px] md:max-w-[280px] lg:max-w-[380px] xl:max-w-[520px]"
+                                  title={r.title}
+                                >
+                                  {r.title}
+                                </span>
                                 {publishedLocalIds.has(r.id) && (
                                   <Badge variant="muted" className="shrink-0 gap-1 font-normal" title="Published to your club">
                                     <Globe className="h-3 w-3" /> Published
@@ -1538,10 +1543,10 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                                 ))}
                               </div>
                             </td>
-                            <td className="hidden p-3 text-muted-foreground md:table-cell">
+                            <td className="hidden whitespace-nowrap p-3 text-muted-foreground md:table-cell">
                               {r.createdAt.slice(0, 10)}
                             </td>
-                            <td className="hidden p-3 text-muted-foreground lg:table-cell">
+                            <td className="hidden whitespace-nowrap p-3 text-muted-foreground lg:table-cell">
                               {formatFileSize(r.fileSize)}
                             </td>
                             <td className="p-2 text-right sm:p-3" onClick={e => e.stopPropagation()}>
