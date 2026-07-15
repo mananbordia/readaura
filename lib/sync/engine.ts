@@ -26,6 +26,10 @@ import type { SyncPushItem } from '@/shared/club-types';
 
 const FORMAT_VERSION = 1;
 const BATCH = 500;
+// The /api/club proxy is a Vercel serverless function with a ~4.5 MB request-body
+// limit, so a larger file blob 413s on PUT. Cap sync blobs safely under that; a
+// bigger file stays local (its doc is skipped) rather than wedging the whole cycle.
+const MAX_SYNC_BLOB = 4 * 1024 * 1024;
 
 // Build the bundle + file blob for a local doc (null if it's gone).
 async function buildBundle(docId: string): Promise<{ bundle: SyncDocBundle; blob: Blob } | null> {
@@ -50,7 +54,7 @@ let running = false;
 
 // One sync cycle: push the outbox, then pull + apply remote changes. Returns
 // counts, or null if signed-out / disabled / already running.
-export async function syncNow(): Promise<{ pushed: number; pulled: number } | null> {
+export async function syncNow(): Promise<{ pushed: number; pulled: number; skippedTooLarge: number } | null> {
   const session = readClubSession();
   if (!session || session.expired) return null; // signed out, or token rejected (awaiting reconnect)
   const meta = await getSyncMeta();
@@ -67,6 +71,10 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number } | nu
     }
     const now = new Date().toISOString();
     const items: SyncPushItem[] = [];
+    // Docs we couldn't push this cycle (blob over the proxy limit, or a transient
+    // upload error). We KEEP their outbox ops so they retry later, but never let
+    // one of them throw and abort the whole push+pull cycle.
+    const skipped = new Set<string>();
     for (const [key, action] of latest) {
       if (action === 'delete') {
         items.push({ kind: 'document', key, action: 'delete', updatedAt: now, envelope: null });
@@ -77,23 +85,29 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number } | nu
         items.push({ kind: 'document', key, action: 'delete', updatedAt: now, envelope: null });
         continue;
       }
-      if (!(await clubApi.syncBlobExists(session.token, built.bundle.fileHash))) {
-        await clubApi.putSyncBlob(session.token, built.bundle.fileHash, built.blob);
+      if (built.blob.size > MAX_SYNC_BLOB) { skipped.add(key); continue; } // too big for the proxy — leave local
+      try {
+        if (!(await clubApi.syncBlobExists(session.token, built.bundle.fileHash))) {
+          await clubApi.putSyncBlob(session.token, built.bundle.fileHash, built.blob);
+        }
+      } catch {
+        skipped.add(key); // upload failed (e.g. a 413) — don't wedge the cycle on one doc
+        continue;
       }
       items.push({
         kind: 'document', key, action: 'put', updatedAt: now,
         envelope: { formatVersion: FORMAT_VERSION, enc: 'none', payload: built.bundle },
       });
     }
-    let pushed = 0;
     for (let i = 0; i < items.length; i += BATCH) {
       const res = await clubApi.pushSync(session.token, { items: items.slice(i, i + BATCH) });
       await setSyncMeta({ lastPushedAt: res.serverTime });
     }
-    if (items.length > 0) {
-      await clearOutboxOps(ops.map((o) => o.id)); // all consumed (only after a clean push)
-      pushed = items.length;
-    }
+    // Clear only consumed ops (pushed/deleted); keep skipped ones so they're
+    // retried, not lost — the size guard above makes each retry a cheap local no-op.
+    const consumedIds = ops.filter((o) => !skipped.has(o.key)).map((o) => o.id);
+    if (consumedIds.length > 0) await clearOutboxOps(consumedIds);
+    const pushed = items.length;
 
     // ---- PULL: apply remote changes since the cursor (incl. tombstones) ----
     const pull = await clubApi.pullSync(session.token, meta.lastPulledAt);
@@ -112,7 +126,7 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number } | nu
       }
     }
     await setSyncMeta({ lastPulledAt: pull.serverTime });
-    return { pushed, pulled };
+    return { pushed, pulled, skippedTooLarge: skipped.size };
   } finally {
     running = false;
   }
@@ -121,7 +135,7 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number } | nu
 // Turn sync on: mark enabled, back-fill the whole library into the outbox, then
 // run a cycle. On a fresh device the outbox backfill is empty (no local docs),
 // so the cycle is a pure restore.
-export async function enableSync(): Promise<{ pushed: number; pulled: number } | null> {
+export async function enableSync(): Promise<{ pushed: number; pulled: number; skippedTooLarge: number } | null> {
   await setSyncMeta({ enabled: true });
   await enqueueAllDocsForBackfill();
   return syncNow();

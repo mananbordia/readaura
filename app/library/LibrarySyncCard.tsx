@@ -24,6 +24,7 @@ export default function LibrarySyncCard({ onSynced, compact }: Props) {
   const [busy, setBusy] = useState(false);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [tooLarge, setTooLarge] = useState(0); // docs skipped this cycle for exceeding the proxy blob limit
   const [reconnectOpen, setReconnectOpen] = useState(false);
 
   // On sign-in, load state and (if on) run a cycle so this device pulls/restores.
@@ -42,6 +43,7 @@ export default function LibrarySyncCard({ onSynced, compact }: Props) {
         const res = await syncNow();
         if (cancelled) return;
         setLastSynced((await getSyncMeta()).lastPulledAt);
+        if (res) setTooLarge(res.skippedTooLarge);
         if (res && res.pulled > 0) onSynced?.();
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Sync failed.');
@@ -76,6 +78,7 @@ export default function LibrarySyncCard({ onSynced, compact }: Props) {
     try {
       const res = await syncNow();
       setLastSynced((await getSyncMeta()).lastPulledAt);
+      if (res) setTooLarge(res.skippedTooLarge);
       if (res && res.pulled > 0) onSynced?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Sync failed.');
@@ -86,8 +89,8 @@ export default function LibrarySyncCard({ onSynced, compact }: Props) {
   const toggle = async () => {
     setBusy(true); setError('');
     try {
-      if (enabled) await disableSync();
-      else await enableSync(); // restores on a fresh device + backs up the library
+      if (enabled) { await disableSync(); setTooLarge(0); }
+      else { const res = await enableSync(); if (res) setTooLarge(res.skippedTooLarge); } // restores on a fresh device + backs up the library
       const m = await getSyncMeta();
       setEnabled(m.enabled);
       setLastSynced(m.lastPulledAt);
@@ -110,6 +113,9 @@ export default function LibrarySyncCard({ onSynced, compact }: Props) {
                 : error ? <span className="text-destructive" title={error}>Sync failed</span>
                 : lastSynced ? `Synced ${timeAgo(lastSynced)}` : 'Synced'}
             </span>
+            {tooLarge > 0 && (
+              <span className="hidden text-amber-600 md:inline" title={`${tooLarge} file(s) exceed the ~4 MB sync limit and stay on this device`}>· {tooLarge} too large</span>
+            )}
             <Button size="icon-sm" variant="ghost" onClick={runSyncNow} disabled={busy} title="Sync now" aria-label="Sync now">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             </Button>
@@ -155,6 +161,11 @@ export default function LibrarySyncCard({ onSynced, compact }: Props) {
         </div>
       </div>
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      {tooLarge > 0 && (
+        <p className="mt-1 text-xs text-amber-600">
+          {tooLarge} file{tooLarge > 1 ? 's' : ''} over 4 MB couldn’t sync (proxy limit) and stay on this device — everything else synced.
+        </p>
+      )}
     </div>
   );
 }
