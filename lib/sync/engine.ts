@@ -52,7 +52,7 @@ let running = false;
 // counts, or null if signed-out / disabled / already running.
 export async function syncNow(): Promise<{ pushed: number; pulled: number } | null> {
   const session = readClubSession();
-  if (!session) return null;
+  if (!session || session.expired) return null; // signed out, or token rejected (awaiting reconnect)
   const meta = await getSyncMeta();
   if (!meta.enabled || running) return null;
   running = true;

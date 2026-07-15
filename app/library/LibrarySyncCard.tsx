@@ -7,6 +7,7 @@ import { getSyncMeta } from '@/lib/storage';
 import { enableSync, disableSync, syncNow } from '@/lib/sync/engine';
 import { timeAgo } from '@/lib/format';
 import { Button } from '@/components/ui/button';
+import JoinClubDialog from './club/JoinClubDialog';
 
 // Opt-in, account-level library sync. Dynamic-imported behind the club build
 // flag (the engine talks to the club backend), so it never ships in the
@@ -23,10 +24,12 @@ export default function LibrarySyncCard({ onSynced, compact }: Props) {
   const [busy, setBusy] = useState(false);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [reconnectOpen, setReconnectOpen] = useState(false);
 
   // On sign-in, load state and (if on) run a cycle so this device pulls/restores.
+  // Skipped while `expired` (a rejected token) — we wait for the reconnect.
   useEffect(() => {
-    if (!club.signedIn) return;
+    if (!club.signedIn || club.expired) return;
     let cancelled = false;
     (async () => {
       const meta = await getSyncMeta();
@@ -47,9 +50,26 @@ export default function LibrarySyncCard({ onSynced, compact }: Props) {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [club.signedIn]);
+  }, [club.signedIn, club.expired]);
 
   if (!club.hydrated || !club.signedIn) return null;
+
+  // Token was rejected on this device — offer a one-tap reconnect (sign in again
+  // with the account key) rather than silently dropping the session.
+  if (club.expired) {
+    return (
+      <div className={compact ? 'flex items-center gap-1 text-xs' : 'mb-4 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm'}>
+        <span className="text-destructive">Session expired</span>
+        <Button size="sm" variant="ghost" className="ml-1" onClick={() => setReconnectOpen(true)}>Sign in again</Button>
+        <JoinClubDialog
+          open={reconnectOpen}
+          onOpenChange={setReconnectOpen}
+          initialMode="recover"
+          onSignedIn={() => { setReconnectOpen(false); onSynced?.(); }}
+        />
+      </div>
+    );
+  }
 
   const runSyncNow = async () => {
     setBusy(true); setError('');
