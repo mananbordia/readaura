@@ -23,13 +23,10 @@ import {
 } from '@/lib/storage';
 import type { SyncDocBundle } from '@/lib/types';
 import type { SyncPushItem } from '@/shared/club-types';
+import { MAX_SYNC_BLOB_BYTES } from '@/lib/sync-limits';
 
 const FORMAT_VERSION = 1;
 const BATCH = 500;
-// The /api/club proxy is a Vercel serverless function with a ~4.5 MB request-body
-// limit, so a larger file blob 413s on PUT. Cap sync blobs safely under that; a
-// bigger file stays local (its doc is skipped) rather than wedging the whole cycle.
-const MAX_SYNC_BLOB = 4 * 1024 * 1024;
 
 // Build the bundle + file blob for a local doc (null if it's gone).
 async function buildBundle(docId: string): Promise<{ bundle: SyncDocBundle; blob: Blob } | null> {
@@ -85,7 +82,7 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number; skipp
         items.push({ kind: 'document', key, action: 'delete', updatedAt: now, envelope: null });
         continue;
       }
-      if (built.blob.size > MAX_SYNC_BLOB) { skipped.add(key); continue; } // too big for the proxy — leave local
+      if (built.blob.size > MAX_SYNC_BLOB_BYTES) { skipped.add(key); continue; } // too big for the proxy — leave local
       try {
         if (!(await clubApi.syncBlobExists(session.token, built.bundle.fileHash))) {
           await clubApi.putSyncBlob(session.token, built.bundle.fileHash, built.blob);
