@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import type { UIMessage } from 'ai';
 import {
   ArrowDownUp, ArrowLeft, ClipboardPaste, FileText, FileType2, Loader2, Minus, PencilLine, Plus,
-  Save, Search, Sparkles, Tags, Trash2, Upload, X, Volume2, Pause, Play, Square, MessageSquare, Users, Globe,
+  Save, Search, Sparkles, Tags, Trash2, Upload, X, Volume2, Pause, Play, Square, MessageSquare, Users, Globe, CloudOff,
 } from 'lucide-react';
 import type { Document, FileType, SavedExplanation } from '@/lib/types';
 import {
@@ -16,6 +16,7 @@ import { convertDocxBlobToHtml } from '@/lib/docx-html';
 import { textToHtml } from '@/lib/reader-html';
 import type { SharedExp } from '@/lib/club/share';
 import { useClub } from '@/lib/use-club';
+import { MAX_SYNC_BLOB_BYTES } from '@/lib/sync-limits';
 import ExplainPopover from './ExplainPopover';
 import SavedExplanationsDrawer from './SavedExplanationsDrawer';
 import { EditorToolbar } from '@/components/editor-toolbar';
@@ -1526,6 +1527,14 @@ export default function LibraryClient({ aiConfigured: serverHasEnvKey, clubEnabl
                                 >
                                   {r.title}
                                 </span>
+                                {club.signedIn && r.fileSize > MAX_SYNC_BLOB_BYTES && (
+                                  <span
+                                    className="shrink-0 text-amber-600"
+                                    title={`Not synced — this file is over ${Math.round(MAX_SYNC_BLOB_BYTES / (1024 * 1024))} MB and stays on this device`}
+                                  >
+                                    <CloudOff className="h-3.5 w-3.5" aria-label="Not synced (too large)" />
+                                  </span>
+                                )}
                                 {publishedLocalIds.has(r.id) && (
                                   <Badge variant="muted" className="shrink-0 gap-1 font-normal" title="Published to your club">
                                     <Globe className="h-3 w-3" /> Published
