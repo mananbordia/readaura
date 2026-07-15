@@ -8,7 +8,10 @@ import type { MemberRole } from '@/shared/club-types';
 // tabs in sync. Private library data never goes here — this is just the club
 // credential.
 
-export type ClubSession = { token: string; userId: string; displayName: string; role: MemberRole };
+// `expired` is set when a request comes back 401 (token rejected). We keep the
+// identity so the UI can offer a one-tap reconnect instead of a silent logout;
+// signing back in with the account key clears it.
+export type ClubSession = { token: string; userId: string; displayName: string; role: MemberRole; expired?: boolean };
 
 const STORAGE = 'readaura-club-session';
 const CHANGE_EVENT = 'readaura-club-change';
@@ -28,6 +31,14 @@ export function writeClubSession(session: ClubSession | null) {
   if (session) localStorage.setItem(STORAGE, JSON.stringify(session));
   else localStorage.removeItem(STORAGE);
   window.dispatchEvent(new Event(CHANGE_EVENT));
+}
+
+// A 401 means this device's token was rejected. Flag the session as needing
+// re-auth WITHOUT discarding it, so the UI prompts a reconnect (sign in again
+// with the account key) instead of silently logging the user out.
+export function markClubSessionExpired() {
+  const s = readClubSession();
+  if (s && !s.expired) writeClubSession({ ...s, expired: true });
 }
 
 export function useClub() {
@@ -50,7 +61,9 @@ export function useClub() {
     session,
     hydrated,
     signedIn: hydrated && !!session,
-    save: (s: ClubSession) => { writeClubSession(s); setSession(s); },
+    // Signed in, but the token was rejected — sync pauses and the UI shows a reconnect prompt.
+    expired: hydrated && !!session?.expired,
+    save: (s: ClubSession) => { writeClubSession(s); setSession(s); }, // fresh session clears `expired`
     signOut: () => { writeClubSession(null); setSession(null); },
   };
 }

@@ -10,9 +10,11 @@ import {
 } from '@/components/ui/dialog';
 import RecoveryCodeNotice from './RecoveryCodeNotice';
 
-// Signed-in account chrome for the library hub header: display name, regenerate
-// recovery code, and sign out. The recovery secret is stored hashed (can't be
-// re-shown), so "show" mints a fresh code and invalidates the old one.
+// Signed-in account chrome for the library hub header: display name, rotate the
+// account key, and sign out. The key is stored hashed (can't be re-shown), so
+// "rotate" mints a fresh key and invalidates the old one. Already-signed-in
+// devices keep working (their tokens are unaffected); the new key is only needed
+// to sign in on further devices.
 export default function ClubAccountControls({ onSignedOut }: { onSignedOut?: () => void }) {
   const club = useClub();
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
@@ -23,13 +25,13 @@ export default function ClubAccountControls({ onSignedOut }: { onSignedOut?: () 
   const showRecovery = async () => {
     const token = club.session?.token;
     if (!token) return;
-    if (!confirm('Show your recovery code?\n\nFor security it’s stored hashed, so we generate a NEW code and your current one stops working. Save the new code somewhere safe.')) return;
+    if (!confirm('Rotate your account key?\n\nIt’s stored hashed, so we generate a NEW key and the current one stops working. Your signed-in devices stay signed in; you’ll use the new key to add more. Save it somewhere safe.')) return;
     setError('');
     try {
       const res = await clubApi.regenerateRecovery(token);
       setRecoveryCode(res.recoveryCode);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not generate a recovery code.');
+      setError(e instanceof Error ? e.message : 'Could not generate an account key.');
     }
   };
 
@@ -40,15 +42,15 @@ export default function ClubAccountControls({ onSignedOut }: { onSignedOut?: () 
   return (
     <div className="flex items-center gap-1 text-sm text-muted-foreground">
       <span className="mr-1 hidden truncate sm:inline">{club.session?.displayName}{club.session?.role === 'owner' ? ' · owner' : ''}</span>
-      <Button variant="ghost" size="icon-sm" onClick={showRecovery} title="Recovery code" aria-label="Recovery code"><KeyRound className="h-4 w-4" /></Button>
+      <Button variant="ghost" size="icon-sm" onClick={showRecovery} title="Account key" aria-label="Account key"><KeyRound className="h-4 w-4" /></Button>
       <Button variant="ghost" size="sm" onClick={signOut}><LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Sign out</span></Button>
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) closeDialog(); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Recovery code</DialogTitle>
+            <DialogTitle>Account key</DialogTitle>
             <DialogDescription className="sr-only">
-              Your reading club account recovery code.
+              Your reading club account key.
             </DialogDescription>
           </DialogHeader>
           {error ? (

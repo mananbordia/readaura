@@ -141,13 +141,37 @@ authRoutes.post('/join', async (c) => {
   return c.json(res);
 });
 
-// Reclaim the same userId after a browser wipe by re-entering the recovery
-// code. Rotates the code on success (single-use).
-// TODO(phase2): rate-limit per locator + source IP to slow brute force.
+// Per-IP throttle for /recover. The account key is a reusable sign-in credential
+// (verified with argon2), so bound online guessing without locking a real user
+// out of their own devices.
+const RECOVER_PER_IP_MAX = 12;
+const RECOVER_WINDOW_MS = 10 * 60_000;
+const recoverHits = new Map<string, { count: number; resetAt: number }>();
+
+function recoverAllowed(ip: string): boolean {
+  const now = Date.now();
+  if (recoverHits.size > 10_000) recoverHits.clear();
+  let e = recoverHits.get(ip);
+  if (!e || now > e.resetAt) {
+    e = { count: 0, resetAt: now + RECOVER_WINDOW_MS };
+    recoverHits.set(ip, e);
+  }
+  e.count += 1;
+  return e.count <= RECOVER_PER_IP_MAX;
+}
+
+// Sign in on a device/browser with the account key (`locator.secret`). This is a
+// REUSABLE credential, not a one-time code: it is verified but NOT rotated, so
+// every device signs in with the same key and gets its own durable token —
+// adding a device never invalidates another. The key only changes when the user
+// explicitly rotates it via POST /recovery.
 authRoutes.post('/recover', async (c) => {
+  const ip = c.req.header('x-club-client-ip') || 'unknown';
+  if (!recoverAllowed(ip)) return c.json({ error: 'too many attempts, try again shortly' }, 429);
+
   const body = await c.req.json<RecoverRequest>().catch(() => null);
   const parsed = body?.recoveryCode ? parseRecoveryCode(body.recoveryCode) : null;
-  if (!parsed) return c.json({ error: 'invalid recovery code' }, 400);
+  if (!parsed) return c.json({ error: 'invalid account key' }, 400);
 
   const [user] = await db
     .select()
@@ -155,15 +179,8 @@ authRoutes.post('/recover', async (c) => {
     .where(eq(users.recoveryLocator, parsed.locator))
     .limit(1);
   if (!user || !(await verifySecret(user.recoveryHash, parsed.secret))) {
-    return c.json({ error: 'invalid recovery code' }, 401);
+    return c.json({ error: 'invalid account key' }, 401);
   }
-
-  const rec = genRecoveryParts();
-  const recoveryHash = await hashSecret(rec.secret);
-  await db
-    .update(users)
-    .set({ recoveryLocator: rec.locator, recoveryHash, recoveryRotatedAt: new Date() })
-    .where(eq(users.id, user.id));
 
   const [m] = await db
     .select()
@@ -183,7 +200,8 @@ authRoutes.post('/recover', async (c) => {
     userId: user.id,
     displayName: user.displayName,
     role,
-    recoveryCode: rec.code,
+    // Unchanged — the key is reusable. Echoed so the client can keep showing it.
+    recoveryCode: `${parsed.locator}.${parsed.secret}`,
   };
   return c.json(res);
 });

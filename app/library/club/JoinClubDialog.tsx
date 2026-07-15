@@ -12,16 +12,20 @@ import {
 } from '@/components/ui/dialog';
 import RecoveryCodeNotice from './RecoveryCodeNotice';
 
-// The join / recover flow, as a dialog so the user never leaves the library hub.
+// The join / sign-in flow, as a dialog so the user never leaves the library hub.
 // On success it saves the session (which flips the hub to its signed-in view via
-// the useClub change event) and shows the one-time recovery code as a final step.
-export default function JoinClubDialog({ open, onOpenChange, onSignedIn }: {
+// the useClub change event). Joining (first device) shows the account key to save;
+// signing in on another device with that key just closes — the key is reusable, so
+// no new code is minted and other devices stay signed in. Open with
+// initialMode="recover" to land straight on the sign-in form (e.g. reconnect).
+export default function JoinClubDialog({ open, onOpenChange, onSignedIn, initialMode = 'join' }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSignedIn?: () => void;
+  initialMode?: 'join' | 'recover';
 }) {
   const club = useClub();
-  const [mode, setMode] = useState<'join' | 'recover'>('join');
+  const [mode, setMode] = useState<'join' | 'recover'>(initialMode);
   const [inviteCode, setInviteCode] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [recoveryInput, setRecoveryInput] = useState('');
@@ -30,26 +34,31 @@ export default function JoinClubDialog({ open, onOpenChange, onSignedIn }: {
   const [error, setError] = useState('');
 
   const reset = () => {
-    setMode('join'); setInviteCode(''); setDisplayName(''); setRecoveryInput('');
+    setMode(initialMode); setInviteCode(''); setDisplayName(''); setRecoveryInput('');
     setRecoveryCode(null); setError(''); setSubmitting(false);
   };
+
+  const handleOpenChange = (o: boolean) => { onOpenChange(o); if (!o) reset(); };
 
   const submit = async () => {
     setSubmitting(true); setError('');
     try {
-      const res = mode === 'join'
-        ? await clubApi.join(inviteCode.trim(), displayName.trim())
-        : await clubApi.recover(recoveryInput.trim());
-      club.save({ token: res.token, userId: res.userId, displayName: res.displayName, role: res.role });
-      setRecoveryCode(res.recoveryCode); // → recovery-code step
-      onSignedIn?.();                     // hub switches to its signed-in view behind the dialog
+      if (mode === 'join') {
+        const res = await clubApi.join(inviteCode.trim(), displayName.trim());
+        club.save({ token: res.token, userId: res.userId, displayName: res.displayName, role: res.role });
+        onSignedIn?.();
+        setRecoveryCode(res.recoveryCode); // first device: show the account key to save
+      } else {
+        const res = await clubApi.recover(recoveryInput.trim());
+        club.save({ token: res.token, userId: res.userId, displayName: res.displayName, role: res.role });
+        onSignedIn?.();
+        handleOpenChange(false); // reusable sign-in: nothing new to save, just close
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not sign in.');
     }
     setSubmitting(false);
   };
-
-  const handleOpenChange = (o: boolean) => { onOpenChange(o); if (!o) reset(); };
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -58,8 +67,10 @@ export default function JoinClubDialog({ open, onOpenChange, onSignedIn }: {
           <DialogTitle className="flex items-center gap-2"><Globe className="h-5 w-5" /> Reading Club</DialogTitle>
           <DialogDescription>
             {recoveryCode
-              ? 'You&apos;re in. Save your recovery code before closing.'
-              : 'Join your club with an invite code to publish and discover docs. Your private notes stay on this device.'}
+              ? 'You&apos;re in. Save your account key before closing — use it to sign in on your other devices and browsers.'
+              : mode === 'recover'
+                ? 'Sign in with your account key. You can be signed in on as many devices and browsers as you like.'
+                : 'Join your club with an invite code to publish and discover docs. Your private notes stay on this device.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -85,19 +96,19 @@ export default function JoinClubDialog({ open, onOpenChange, onSignedIn }: {
                   {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Join club'}
                 </Button>
                 <button className="text-xs text-muted-foreground underline" onClick={() => { setMode('recover'); setError(''); }}>
-                  Cleared your browser? Recover with a recovery code
+                  Already have an account? Sign in with your account key
                 </button>
               </>
             ) : (
               <>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="recovery">Recovery code</Label>
+                  <Label htmlFor="recovery">Account key</Label>
                   <Input id="recovery" value={recoveryInput} onChange={(e) => setRecoveryInput(e.target.value)} placeholder="locator.secret" />
                 </div>
                 <Button onClick={submit} disabled={submitting || !recoveryInput.trim()}>
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Recover account'}
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sign in'}
                 </Button>
-                <button className="text-xs text-muted-foreground underline" onClick={() => { setMode('join'); setError(''); }}>Back to join</button>
+                <button className="text-xs text-muted-foreground underline" onClick={() => { setMode('join'); setError(''); }}>Have an invite instead? Join</button>
               </>
             )}
           </div>

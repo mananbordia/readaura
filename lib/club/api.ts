@@ -17,16 +17,16 @@ import type {
   SyncPushRequest,
   SyncPushResponse,
 } from '@/shared/club-types';
-import { writeClubSession } from '@/lib/use-club';
+import { markClubSessionExpired } from '@/lib/use-club';
 
 const BASE = '/api/club';
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    // A 401 means the token was rejected (expired, or the account was removed
-    // server-side). Drop the stale session so the UI re-prompts to join/recover
-    // instead of looping on a broken credential.
-    if (res.status === 401) writeClubSession(null);
+    // A 401 means this device's token was rejected. Flag the session as needing
+    // re-auth (keeping the identity) so the UI offers a one-tap reconnect —
+    // never a silent logout that strips the account from this device.
+    if (res.status === 401) markClubSessionExpired();
     let msg = `HTTP ${res.status}`;
     try {
       const body = await res.json();
