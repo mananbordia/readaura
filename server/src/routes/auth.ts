@@ -38,7 +38,7 @@ authRoutes.post('/recovery', requireMember, async (c) => {
 });
 
 // Throttle /join to blunt brute force of the short (6-char) invite codes.
-// The Vercel proxy forwards the real client IP as x-club-client-ip, so we can
+// Vercel and Nginx overwrite x-club-client-ip with the real client IP, so we can
 // bucket per-IP (one attacker can't lock everyone out) with a global backstop.
 const PER_IP_MAX = 10;
 const PER_IP_WINDOW_MS = 10 * 60_000;

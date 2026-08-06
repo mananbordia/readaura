@@ -13,8 +13,20 @@ function required(name: string): string {
 export const env = {
   DATABASE_URL: required('DATABASE_URL'),
   CLUB_JWT_SECRET: required('CLUB_JWT_SECRET'),
-  /** Only the Vercel proxy knows this; every non-health route requires it. */
+  /** Legacy Vercel proxy credential; retained during the browser-direct rollout. */
   CLUB_PROXY_SECRET: required('CLUB_PROXY_SECRET'),
+  /** Exact browser origins allowed to call the HTTPS gateway directly. */
+  CORS_ALLOWED_ORIGINS: (process.env.CORS_ALLOWED_ORIGINS ?? [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'https://readaura-ai.vercel.app',
+    'https://readaura-eight.vercel.app',
+    'https://readaura-mananbordias-projects.vercel.app',
+    'https://readaura-mananbordia-mananbordias-projects.vercel.app',
+  ].join(','))
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
   PORT: Number(process.env.PORT ?? 8080),
   /** Content-addressed blob store (snapshot HTML + PDF bytes). */
   CLUB_BLOB_DIR: process.env.CLUB_BLOB_DIR ?? '/home/ubuntu/readaura/blobs',

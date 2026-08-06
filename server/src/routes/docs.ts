@@ -11,7 +11,7 @@ import type {
 } from '../../../shared/club-types';
 
 const HASH_RE = /^[a-f0-9]{64}$/;
-const MAX_BLOB = 25 * 1024 * 1024; // 25 MB hard cap (Vercel proxy ~4.5MB is the real limit)
+const MAX_BLOB = 25 * 1024 * 1024; // Matches the Nginx hard cap; client stops at 24 MiB.
 
 type DocRow = {
   logicalId: string;

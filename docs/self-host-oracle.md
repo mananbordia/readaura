@@ -1,24 +1,21 @@
 # Self-hosting the ReadAura club backend on Oracle Cloud
 
 The club backend runs **only** on your own box. The Next.js frontend stays on
-Vercel and reaches the backend through the `app/api/club/[...path]` proxy — so
-the browser only ever talks to Vercel (HTTPS), and Vercel forwards to the box
-over plain HTTP, server-to-server.
+Vercel, while the browser calls the backend directly through the shared Nginx
+HTTPS gateway. The old `app/api/club/[...path]` proxy remains temporarily for
+cached/older clients during rollout.
 
 ```
-Browser ──HTTPS──▶ Vercel (/api/club/* proxy) ──HTTP──▶ Oracle box :8080 (Hono) ──▶ Postgres
+Browser ──HTTPS──▶ Oracle Nginx /readaura-api/* ──HTTP/loopback──▶ :8080 (Hono) ──▶ Postgres
 ```
 
 Target box (this guide's example): **Ubuntu 24.04, arm64 (Ampere A1), 1 vCPU /
 6 GB**, public IP `134.185.90.180`, login user `ubuntu`. The backend listens on
 `:8080`; Postgres is local-only.
 
-> **Security note (read this).** The Vercel→box hop is **unencrypted HTTP** for
-> now, so the member JWT and any opt-in personal-sync data cross the public
-> internet in plaintext. Fine to get going on a trusted small club. **Before you
-> put real private data into personal sync, add TLS** — the easiest path is a
-> DuckDNS hostname + Caddy/Let's Encrypt in front of `:8080`, then flip
-> `CLUB_BACKEND_URL` on Vercel to `https://…`. Nothing else changes.
+The public hop is HTTPS with a trusted Let's Encrypt IP certificate. Nginx talks
+to Hono only over loopback. Member routes authenticate the bearer JWT; the
+browser never receives `CLUB_PROXY_SECRET`.
 
 ---
 
@@ -67,6 +64,7 @@ openssl rand -base64 32   # -> CLUB_PROXY_SECRET  (also set this on Vercel)
 DATABASE_URL=postgresql://readaura:CHANGE_ME_STRONG@localhost:5432/readaura_club
 CLUB_JWT_SECRET=<from openssl>
 CLUB_PROXY_SECRET=<from openssl — must match Vercel>
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,https://readaura-ai.vercel.app
 PORT=8080
 CLUB_NAME=ReadAura Club
 SYNC_MAX_BYTES=5000000
@@ -98,41 +96,31 @@ curl -s localhost:8080/health    # {"ok":true,"service":"readaura-club"}
 journalctl -u readaura-club -f   # find the one-time BOOTSTRAP OWNER INVITE printed on first start
 ```
 
-## 7. Open port 8080 — BOTH layers (Oracle's classic gotcha)
+## 7. Publish through the shared HTTPS gateway
 
-Oracle Ubuntu images ship host iptables rules that block ports **even after**
-you open the Security List. You must do both (the same two steps you already did
-for your `:5555` service):
+Add a collision-free `/readaura-api/` location to the existing Nginx TLS server
+and proxy it to `http://127.0.0.1:8080/`, stripping the prefix. Set
+`X-Club-Client-IP` from `$remote_addr`, allow request bodies up to 25 MB, and
+keep HFT `/api/` plus Clash `/clash-api/` unchanged. The backend accepts
+secretless requests only when the upstream connection is loopback; direct
+public `:8080` calls still require `CLUB_PROXY_SECRET` during rollout.
 
-**a) Oracle Security List (ingress rule)** — VCN → the instance's subnet →
-Security List → add Ingress: Source `0.0.0.0/0`, IP Protocol TCP, Dest port
-`8080`. (Tighter: restrict the source to Vercel's egress range if you pin one.)
-
-**b) Host firewall on the box:**
-
-```bash
-sudo iptables -I INPUT 6 -p tcp --dport 8080 -j ACCEPT
-sudo netfilter-persistent save      # persist across reboots
-```
-
-Verify from your laptop: `curl http://134.185.90.180:8080/health` → 403
-(`forbidden`) is the **correct** answer — the port is reachable but rejects
-calls without the proxy secret. Health is open; the secret-guarded routes 403.
-
-## 8. Point Vercel at the box
+## 8. Point the browser at HTTPS
 
 Set these on the Vercel project (Production), then redeploy:
 
 | Var | Value |
 |---|---|
 | `NEXT_PUBLIC_CLUB_ENABLED` | `true` (build-time; ships the club UI) |
+| `NEXT_PUBLIC_CLUB_API_URL` | `https://134.185.90.180/readaura-api` |
 | `CLUB_ENABLED` | `true` (server; lets the proxy forward) |
 | `CLUB_BACKEND_URL` | `http://134.185.90.180:8080` |
 | `CLUB_PROXY_SECRET` | same value as on the box |
 
-Verify end-to-end: the deployed app's `/api/club/health` should now return the
-backend's JSON (the proxy injects the secret). With these vars **unset** (e.g.
-the demo deploy) the proxy 404s and no club UI ships — byte-for-byte today.
+Verify the direct endpoint's CORS response for every production alias, member
+JWT reads/writes, blob upload/download, and sync. Keep the proxy variables only
+for the compatibility window; new browser code does not use them. With the club
+flag unset, no club UI ships — byte-for-byte today.
 
 ## 9. Backups (do this — single box = single point of failure)
 

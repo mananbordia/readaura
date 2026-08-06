@@ -68,7 +68,7 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number; skipp
     }
     const now = new Date().toISOString();
     const items: SyncPushItem[] = [];
-    // Docs we couldn't push this cycle (blob over the proxy limit, or a transient
+    // Docs we couldn't push this cycle (blob over the gateway limit, or a transient
     // upload error). We KEEP their outbox ops so they retry later, but never let
     // one of them throw and abort the whole push+pull cycle.
     const skipped = new Set<string>();
@@ -82,7 +82,7 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number; skipp
         items.push({ kind: 'document', key, action: 'delete', updatedAt: now, envelope: null });
         continue;
       }
-      if (built.blob.size > MAX_SYNC_BLOB_BYTES) { skipped.add(key); continue; } // too big for the proxy — leave local
+      if (built.blob.size > MAX_SYNC_BLOB_BYTES) { skipped.add(key); continue; } // too big for the gateway — leave local
       try {
         if (!(await clubApi.syncBlobExists(session.token, built.bundle.fileHash))) {
           await clubApi.putSyncBlob(session.token, built.bundle.fileHash, built.blob);
