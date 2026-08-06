@@ -2,8 +2,8 @@
 //
 // After `next build` WITHOUT NEXT_PUBLIC_CLUB_ENABLED (the default / Vercel-demo
 // build), no club code may be EAGERLY loaded by the app. We scan the built
-// client chunks for string markers that only appear in club client code and
-// survive minification: data-club, /api/club, x-club-proxy-secret.
+// client chunks for a string marker that appears only in club client code and
+// survives minification: data-club.
 //
 // Club UI is a next/dynamic import gated behind the build flag, so when the flag
 // is off the club chunk is registered in react-loadable-manifest.json but is
@@ -15,7 +15,7 @@ import { basename, join } from 'node:path';
 
 const NEXT = '.next';
 const STATIC = join(NEXT, 'static');
-const FORBIDDEN = ['data-club', '/api/club', 'x-club-proxy-secret'];
+const FORBIDDEN = ['data-club'];
 
 async function walk(dir, match) {
   const out = [];

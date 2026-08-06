@@ -1,6 +1,6 @@
 // Thin browser client for the Club API. Production points directly at the
 // Oracle HTTPS gateway; local development defaults to the local backend.
-// Never put CLUB_PROXY_SECRET (or any credential) in a NEXT_PUBLIC variable.
+// Never put any credential in a NEXT_PUBLIC variable.
 
 import type {
   CreateInviteResponse,

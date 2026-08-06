@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { env } from './env';
-import { proxyGuard } from './middleware/proxy-guard';
+import { gatewayGuard } from './middleware/gateway-guard';
 import { ensureSeed } from './seed';
 import { authRoutes } from './routes/auth';
 import { blobsRoutes, docsRoutes } from './routes/docs';
@@ -26,42 +26,42 @@ app.use(
   }),
 );
 
-// Liveness — intentionally NOT behind the proxy guard, so the Vercel proxy and
-// a plain curl can health-check the box.
+// Liveness is intentionally outside the route guard, but the server itself is
+// loopback-only. External health checks go through Nginx HTTPS.
 app.get('/health', (c) => c.json({ ok: true, service: 'readaura-club' }));
 
-// Everything below must arrive through either the legacy Vercel proxy or local
-// Nginx. Guard exact mount paths AND subpaths (e.g. GET /docs is discover).
-app.use('/auth/*', proxyGuard);
+// Everything below must arrive through local Nginx. Guard exact mount paths AND
+// subpaths (e.g. GET /docs is discover).
+app.use('/auth/*', gatewayGuard);
 app.route('/auth', authRoutes);
 
-app.use('/docs', proxyGuard);
-app.use('/docs/*', proxyGuard);
+app.use('/docs', gatewayGuard);
+app.use('/docs/*', gatewayGuard);
 app.route('/docs', docsRoutes);
 
-app.use('/blobs/*', proxyGuard);
+app.use('/blobs/*', gatewayGuard);
 app.route('/blobs', blobsRoutes);
 
-app.use('/invites', proxyGuard);
-app.use('/invites/*', proxyGuard);
+app.use('/invites', gatewayGuard);
+app.use('/invites/*', gatewayGuard);
 app.route('/invites', invitesRoutes);
 
-app.use('/members', proxyGuard);
-app.use('/members/*', proxyGuard);
+app.use('/members', gatewayGuard);
+app.use('/members/*', gatewayGuard);
 app.route('/members', membersRoutes);
 
 // Phase 3: shared annotations (explanations auto-shared onto club docs).
-app.use('/annotations', proxyGuard);
-app.use('/annotations/*', proxyGuard);
+app.use('/annotations', gatewayGuard);
+app.use('/annotations/*', gatewayGuard);
 app.route('/annotations', annotationsRoutes);
 
 // Personal sync (opt-in account-level library mirror; separate lane from clubs).
-app.use('/sync', proxyGuard);
-app.use('/sync/*', proxyGuard);
+app.use('/sync', gatewayGuard);
+app.use('/sync/*', gatewayGuard);
 app.route('/sync', syncRoutes);
 
 await ensureSeed();
 
-serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-  console.log(`[club] readaura-club backend listening on :${info.port}`);
+serve({ fetch: app.fetch, port: env.PORT, hostname: '127.0.0.1' }, (info) => {
+  console.log(`[club] readaura-club backend listening on 127.0.0.1:${info.port}`);
 });
