@@ -2,8 +2,7 @@
 
 The club backend runs **only** on your own box. The Next.js frontend stays on
 Vercel, while the browser calls the backend directly through the shared Nginx
-HTTPS gateway. The old `app/api/club/[...path]` proxy remains temporarily for
-cached/older clients during rollout.
+HTTPS gateway. There is no Vercel API proxy in this path.
 
 ```
 Browser ──HTTPS──▶ Oracle Nginx /readaura-api/* ──HTTP/loopback──▶ :8080 (Hono) ──▶ Postgres
@@ -11,11 +10,11 @@ Browser ──HTTPS──▶ Oracle Nginx /readaura-api/* ──HTTP/loopback─
 
 Target box (this guide's example): **Ubuntu 24.04, arm64 (Ampere A1), 1 vCPU /
 6 GB**, public IP `134.185.90.180`, login user `ubuntu`. The backend listens on
-`:8080`; Postgres is local-only.
+`127.0.0.1:8080`; Postgres is local-only.
 
 The public hop is HTTPS with a trusted Let's Encrypt IP certificate. Nginx talks
 to Hono only over loopback. Member routes authenticate the bearer JWT; the
-browser never receives `CLUB_PROXY_SECRET`.
+browser receives no server credential.
 
 ---
 
@@ -57,13 +56,11 @@ npm ci
 cp .env.example .env
 # Generate secrets:
 openssl rand -base64 48   # -> CLUB_JWT_SECRET
-openssl rand -base64 32   # -> CLUB_PROXY_SECRET  (also set this on Vercel)
 ```
 
 ```ini
 DATABASE_URL=postgresql://readaura:CHANGE_ME_STRONG@localhost:5432/readaura_club
 CLUB_JWT_SECRET=<from openssl>
-CLUB_PROXY_SECRET=<from openssl — must match Vercel>
 CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,https://readaura-ai.vercel.app
 PORT=8080
 CLUB_NAME=ReadAura Club
@@ -102,8 +99,8 @@ Add a collision-free `/readaura-api/` location to the existing Nginx TLS server
 and proxy it to `http://127.0.0.1:8080/`, stripping the prefix. Set
 `X-Club-Client-IP` from `$remote_addr`, allow request bodies up to 25 MB, and
 keep HFT `/api/` plus Clash `/clash-api/` unchanged. The backend accepts
-secretless requests only when the upstream connection is loopback; direct
-public `:8080` calls still require `CLUB_PROXY_SECRET` during rollout.
+requests only when the upstream connection is loopback and also binds its
+listener to `127.0.0.1`. Do not open `8080` in the host firewall or Oracle VCN.
 
 ## 8. Point the browser at HTTPS
 
@@ -113,14 +110,10 @@ Set these on the Vercel project (Production), then redeploy:
 |---|---|
 | `NEXT_PUBLIC_CLUB_ENABLED` | `true` (build-time; ships the club UI) |
 | `NEXT_PUBLIC_CLUB_API_URL` | `https://134.185.90.180/readaura-api` |
-| `CLUB_ENABLED` | `true` (server; lets the proxy forward) |
-| `CLUB_BACKEND_URL` | `http://134.185.90.180:8080` |
-| `CLUB_PROXY_SECRET` | same value as on the box |
 
 Verify the direct endpoint's CORS response for every production alias, member
-JWT reads/writes, blob upload/download, and sync. Keep the proxy variables only
-for the compatibility window; new browser code does not use them. With the club
-flag unset, no club UI ships — byte-for-byte today.
+JWT reads/writes, blob upload/download, and sync. With the club flag unset, no
+club UI ships — byte-for-byte today.
 
 ## 9. Backups (do this — single box = single point of failure)
 
@@ -143,4 +136,3 @@ Wire it to a cron/systemd-timer and copy off-box.
 - **JWT secret:** rotating `CLUB_JWT_SECRET` invalidates all member tokens
   (everyone re-joins or recovers).
 - **Recovery codes** are single-use and rotate on every successful recovery.
-- **Proxy secret:** rotate on both the box and Vercel together.

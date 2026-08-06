@@ -1,5 +1,5 @@
-// Canonical contracts shared by the browser client, the transitional Vercel
-// `/api/club` proxy, and the Hono backend on Oracle. Pure types + a couple of
+// Canonical contracts shared by the browser client and the Hono backend on
+// Oracle. Pure types + a couple of
 // constants — NO runtime logic and NO dependencies — so both the Next.js build
 // and the separate `server/` package can import this file without coupling.
 //

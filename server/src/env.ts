@@ -13,8 +13,6 @@ function required(name: string): string {
 export const env = {
   DATABASE_URL: required('DATABASE_URL'),
   CLUB_JWT_SECRET: required('CLUB_JWT_SECRET'),
-  /** Legacy Vercel proxy credential; retained during the browser-direct rollout. */
-  CLUB_PROXY_SECRET: required('CLUB_PROXY_SECRET'),
   /** Exact browser origins allowed to call the HTTPS gateway directly. */
   CORS_ALLOWED_ORIGINS: (process.env.CORS_ALLOWED_ORIGINS ?? [
     'http://localhost:3000',
