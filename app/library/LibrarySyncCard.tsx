@@ -114,7 +114,7 @@ export default function LibrarySyncCard({ onSynced, compact }: Props) {
                 : lastSynced ? `Synced ${timeAgo(lastSynced)}` : 'Synced'}
             </span>
             {tooLarge > 0 && (
-              <span className="hidden text-amber-600 md:inline" title={`${tooLarge} file(s) exceed the ~4 MB sync limit and stay on this device`}>· {tooLarge} too large</span>
+              <span className="hidden text-amber-600 md:inline" title={`${tooLarge} file(s) exceed the 24 MB sync limit and stay on this device`}>· {tooLarge} too large</span>
             )}
             <Button size="icon-sm" variant="ghost" onClick={runSyncNow} disabled={busy} title="Sync now" aria-label="Sync now">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -163,7 +163,7 @@ export default function LibrarySyncCard({ onSynced, compact }: Props) {
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
       {tooLarge > 0 && (
         <p className="mt-1 text-xs text-amber-600">
-          {tooLarge} file{tooLarge > 1 ? 's' : ''} over 4 MB couldn’t sync (proxy limit) and stay on this device — everything else synced.
+          {tooLarge} file{tooLarge > 1 ? 's' : ''} over 24 MB couldn’t sync and stay on this device — everything else synced.
         </p>
       )}
     </div>

@@ -2,8 +2,8 @@
 # Run the LOCAL dev frontend against the PRODUCTION club backend (the Oracle box),
 # only to verify a just-deployed backend (see CLAUDE.md "Deploying to production").
 #
-# It pulls the box URL + proxy secret from Vercel ON DEMAND (never stored in the
-# repo, always current — e.g. after a secret rotation) and runs the FE on :3001,
+# It pulls the direct HTTPS API URL from Vercel ON DEMAND (never stored in the
+# repo) and runs the FE on :3001,
 # a separate origin so its browser data (club JWT + IndexedDB) never mixes with
 # your local-backend dev on :3000. Plain `npm run dev` stays fully local.
 set -euo pipefail
@@ -32,13 +32,13 @@ set -a
 . "$ENVFILE"
 set +a
 
-case "${CLUB_BACKEND_URL:-}" in
+case "${NEXT_PUBLIC_CLUB_API_URL:-}" in
   ""|*localhost*|*127.0.0.1*)
-    echo "✗ Pulled CLUB_BACKEND_URL is empty or localhost — aborting (expected the box)." >&2
+    echo "✗ Pulled NEXT_PUBLIC_CLUB_API_URL is empty or localhost — aborting (expected the box HTTPS gateway)." >&2
     exit 1 ;;
 esac
 
-echo "→ Backend for this run: $CLUB_BACKEND_URL"
+echo "→ Backend for this run: $NEXT_PUBLIC_CLUB_API_URL"
 echo "→ Starting Next dev on http://localhost:3001 …"
 echo
 ./node_modules/.bin/next dev -p 3001

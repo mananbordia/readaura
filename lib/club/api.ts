@@ -1,6 +1,6 @@
-// Thin client for the club backend. Every request goes to the same-origin
-// /api/club proxy (Vercel HTTPS), which forwards to the Oracle backend. This is
-// the ONLY club network surface on the client.
+// Thin browser client for the Club API. Production points directly at the
+// Oracle HTTPS gateway; local development defaults to the local backend.
+// Never put CLUB_PROXY_SECRET (or any credential) in a NEXT_PUBLIC variable.
 
 import type {
   CreateInviteResponse,
@@ -19,7 +19,7 @@ import type {
 } from '@/shared/club-types';
 import { markClubSessionExpired } from '@/lib/use-club';
 
-const BASE = '/api/club';
+const BASE = (process.env.NEXT_PUBLIC_CLUB_API_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {

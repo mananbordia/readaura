@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { env } from './env';
 import { proxyGuard } from './middleware/proxy-guard';
 import { ensureSeed } from './seed';
@@ -12,12 +13,25 @@ import { syncRoutes } from './routes/sync';
 
 const app = new Hono();
 
+// Browser-direct Club API calls are allowed only from known ReadAura and local
+// development origins. CORS is not authentication; member routes still verify
+// their bearer JWT, while join/recover retain per-IP throttles.
+app.use(
+  '*',
+  cors({
+    origin: (origin) => env.CORS_ALLOWED_ORIGINS.includes(origin) ? origin : null,
+    allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Authorization', 'Content-Type'],
+    maxAge: 86400,
+  }),
+);
+
 // Liveness — intentionally NOT behind the proxy guard, so the Vercel proxy and
 // a plain curl can health-check the box.
 app.get('/health', (c) => c.json({ ok: true, service: 'readaura-club' }));
 
-// Everything below requires the shared proxy secret.
-// Guard exact mount paths AND subpaths (e.g. GET /docs is the discover list).
+// Everything below must arrive through either the legacy Vercel proxy or local
+// Nginx. Guard exact mount paths AND subpaths (e.g. GET /docs is discover).
 app.use('/auth/*', proxyGuard);
 app.route('/auth', authRoutes);
 
